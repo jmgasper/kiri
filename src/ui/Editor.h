@@ -1,6 +1,7 @@
 #pragma once
 #include <ScintillaView.h>
 #include "ui/Theme.h"
+#include "ui/EditorSettings.h"
 #include <string>
 #include <ILoader.h>
 #include <memory>
@@ -18,6 +19,7 @@ public:
     void NotificationReceived(SCNotification* notification) override;
     void ContextMenu(BPoint where) override;
     void ApplyTheme(const Theme& theme);
+    void ApplySettings(const EditorSettings& settings);
     void SetLanguage(const std::string& path,bool large=false);
     void SetText(const std::string& bytes,bool readOnly=false,int eol=2);
     std::shared_ptr<EditorLoader> CreateLoader(bool large);
@@ -35,8 +37,10 @@ public:
     void GoTo(size_t line,size_t column=1);
 private:
     void Style(int id,rgb_color color,bool bold=false);
+    void UpdateMarginWidth();
     std::string fLexer="null",fLanguage="Plain Text";
     Theme fTheme=Theme::Builtins()[0];
+    EditorSettings fSettings;
     bool fLoading=false,fRecovered=false;
     int fDigits=0;
     int64 fRevision=0;

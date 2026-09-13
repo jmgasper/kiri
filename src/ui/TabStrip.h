@@ -4,8 +4,10 @@
 #include "ui/Messages.h"
 #include <string>
 #include <vector>
+#include <memory>
+class BBitmap;
 namespace kiri {
-struct TabLabel { std::string name,tooltip; bool dirty=false; int64 id=0; };
+struct TabLabel { std::string name,tooltip; bool dirty=false; int64 id=0; std::shared_ptr<const BBitmap> icon; };
 struct TabActions {
     uint32 select=kSelectTab,close=kCloseTab,closeAll=kCloseAllTabs,closeOthers=kCloseOtherTabs,create=0;
 };

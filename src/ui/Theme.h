@@ -2,7 +2,7 @@
 #include <GraphicsDefs.h>
 #include <string>
 #include <vector>
-class BView;
+class BView;class BMenu;
 namespace kiri {
 struct Theme {
     std::string name;
@@ -12,5 +12,8 @@ struct Theme {
     static const std::vector<Theme>& Builtins();
 };
 int SciColor(rgb_color color);
+int ThemeIndex(const std::string& name);
+BMenu* ThemeMenu(const char* name,uint32 command,int selected);
+void MarkTheme(BMenu* menu,int selected);
 void ThemeView(BView* view,const Theme& theme);
 }

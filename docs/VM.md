@@ -28,7 +28,10 @@ bash tools/haiku.sh 'hey application/x-vnd.Kiri-workspace-tests quit'
 ```
 
 The harness uses the production workspace code with a different application
-signature. Create the disposable project before launching it. Each card host's
+signature. An optional third argument after the project sets another signature
+(for example `application/x-vnd.Kiri-preferences-tests`) when an earlier test
+instance is in use. Use a different settings directory and project as well.
+Create the disposable project before launching it. Each card host's
 child count includes one empty placeholder in addition to the open tabs.
 `tools/vm.py right-click X Y WIDTH HEIGHT` opens native context menus; use
 `screenshot -s -w OUTPUT.png` inside Haiku to capture only the active window.

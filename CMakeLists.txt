@@ -32,14 +32,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
     set(KIRI_UI_SOURCES src/ui/Workspace.cpp src/ui/Editor.cpp
         src/ui/Theme.cpp src/ui/Explorer.cpp src/ui/TerminalView.cpp
         src/ui/PreviewView.cpp src/ui/GitView.cpp src/ui/TabStrip.cpp
-        src/ui/TerminalPanel.cpp src/ui/RefreshButton.cpp)
+        src/ui/TerminalPanel.cpp src/ui/RefreshButton.cpp
+        src/ui/EditorSettings.cpp src/ui/PreferencesWindow.cpp src/ui/FileIcons.cpp)
     add_executable(Kiri src/main.cpp ${KIRI_UI_SOURCES})
     target_include_directories(Kiri PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
     target_compile_options(Kiri PRIVATE -Wall -Wextra -Wno-multichar)
     target_link_libraries(Kiri PRIVATE kiri_core ${SCINTILLA_LIBRARY} ${LEXILLA_LIBRARY}
         be tracker translation)
     if(BUILD_TESTING)
-        add_executable(kiri_native_tests tests/NativeTests.cpp src/ui/Editor.cpp src/ui/Theme.cpp)
+        add_executable(kiri_native_tests tests/NativeTests.cpp src/ui/Editor.cpp src/ui/Theme.cpp src/ui/EditorSettings.cpp src/ui/FileIcons.cpp)
         target_include_directories(kiri_native_tests PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
         target_link_libraries(kiri_native_tests PRIVATE kiri_core ${SCINTILLA_LIBRARY} ${LEXILLA_LIBRARY} be)
         add_test(NAME kiri_native COMMAND kiri_native_tests)

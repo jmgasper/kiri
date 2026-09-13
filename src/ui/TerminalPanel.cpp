@@ -45,7 +45,7 @@ void TerminalPanel::UpdateTabs() {
     for(const auto& session:fSessions) {
         auto name="Terminal "+std::to_string(session.id);
         if(session.view->Exited()) name+=" · exited";
-        labels.push_back({name,session.directory,false,session.id});
+        labels.push_back({name,session.directory,false,session.id,{}});
     }
     fTabs->SetTabs(std::move(labels),fSelected);
 }

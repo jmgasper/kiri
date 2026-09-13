@@ -100,6 +100,7 @@ void GitView::AttachedToWindow() {
     Refresh();
 }
 void GitView::ApplyTheme(const Theme& t) { fTheme=t;ThemeView(this,t);fDiff->ApplyTheme(t); }
+void GitView::ApplySettings(const EditorSettings& settings) { ApplyTheme(Theme::Builtins()[settings.theme]);fDiff->ApplySettings(settings); }
 void GitView::SetRepository(std::string root,const std::string& error) {
     ++fGeneration;++fDiffRequest;++fHistoryRequest;++fStatusRequest;fRoot=std::move(root);fHistoryPath.clear();fBusy=fHistoryBusy=false;
     if(fJobs) { fJobs->Cancel("status");fJobs->Cancel("history");fJobs->Cancel("diff"); }

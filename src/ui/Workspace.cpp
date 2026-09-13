@@ -7,6 +7,8 @@
 #include "ui/TabStrip.h"
 #include "ui/TerminalPanel.h"
 #include "ui/RefreshButton.h"
+#include "ui/PreferencesWindow.h"
+#include "ui/FileIcons.h"
 #include <Alert.h>
 #include <Application.h>
 #include <Button.h>
@@ -195,11 +197,11 @@ Workspace::Workspace(const std::string& settingsDirectory):BWindow(BRect(40,70,1
     BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(menu).Add(toolbar).Add(fSidebarSplit).Add(fStatus);
     for(int32 i=0;i<CountChildren();++i) ThemeView(ChildAt(i),Theme::Builtins()[0]);
     ResizeTo(1195,685);
-    RestoreSettings();ApplyTheme(fThemeIndex);
+    RestoreSettings();ApplyTheme(fEditorSettings.theme);
     BMessage pulse(kPulse);fPulse=std::make_unique<BMessageRunner>(BMessenger(this),&pulse,2000000);
     if(fTerminal->Empty()) NewTerminal(false);
 }
-Workspace::~Workspace() { fPulse.reset();fRecoveryTimer.reset();fRecoveryJobs.reset();fJobs.reset(); }
+Workspace::~Workspace() { if(fPreferencesWindow.IsValid()) fPreferencesWindow.SendMessage(B_QUIT_REQUESTED);fPulse.reset();fRecoveryTimer.reset();fRecoveryJobs.reset();fJobs.reset(); }
 
 BMenuBar* Workspace::BuildMenus() {
     auto* bar=new BMenuBar("menu");
@@ -210,11 +212,10 @@ BMenuBar* Workspace::BuildMenus() {
     };
     auto* file=new BMenu("File");add(file,"New File",kNewFile,'N');add(file,"Open File…",kOpenFile,'O');add(file,"Open Folder…",kOpenProject,'O',B_SHIFT_KEY);file->AddSeparatorItem();
     add(file,"Save",kSave,'S');add(file,"Save As…",kSaveAs,'S',B_SHIFT_KEY);add(file,"Save All",kSaveAll);add(file,"Close Tab",kCloseTab,'W');file->AddSeparatorItem();add(file,"Quit",B_QUIT_REQUESTED,'Q');bar->AddItem(file);
-    auto* edit=new BMenu("Edit");add(edit,"Undo",B_UNDO,'Z');add(edit,"Redo",B_REDO,'Z',B_SHIFT_KEY);edit->AddSeparatorItem();add(edit,"Cut",B_CUT,'X');add(edit,"Copy",B_COPY,'C');add(edit,"Paste",B_PASTE,'V');add(edit,"Select All",B_SELECT_ALL,'A');bar->AddItem(edit);
+    auto* edit=new BMenu("Edit");add(edit,"Undo",B_UNDO,'Z');add(edit,"Redo",B_REDO,'Z',B_SHIFT_KEY);edit->AddSeparatorItem();add(edit,"Cut",B_CUT,'X');add(edit,"Copy",B_COPY,'C');add(edit,"Paste",B_PASTE,'V');add(edit,"Select All",B_SELECT_ALL,'A');edit->AddSeparatorItem();add(edit,"Preferences…",kShowPreferences,',');bar->AddItem(edit);
     auto* view=new BMenu("View");add(view,"Show / Hide Files",kToggleSidebar,'B');add(view,"Show / Hide Terminal",kToggleTerminal,'`');add(view,"Source Control",kToggleGit,'G',B_SHIFT_KEY);view->AddSeparatorItem();
-    auto* themes=new BMenu("Color Theme");themes->SetRadioMode(true);
-    for(size_t i=0;i<Theme::Builtins().size();++i) { BMessage* message=new BMessage(kTheme);message->AddInt32("index",i);themes->AddItem(new BMenuItem(Theme::Builtins()[i].name.c_str(),message)); }
-    view->AddItem(themes);add(view,"Zoom In",kZoomIn,'+');add(view,"Zoom Out",kZoomOut,'-');add(view,"Word Wrap",kWrap);add(view,"Show Whitespace",kShowWhitespace);bar->AddItem(view);
+    fThemes=ThemeMenu("Color Theme",kTheme,0);fThemes->SetLabelFromMarked(false);
+    view->AddItem(fThemes);add(view,"Zoom In",kZoomIn,'+');add(view,"Zoom Out",kZoomOut,'-');add(view,"Word Wrap",kWrap);add(view,"Show Whitespace",kShowWhitespace);bar->AddItem(view);
     auto* search=new BMenu("Search");add(search,"Find / Replace",kFind,'F');add(search,"Find Next",kFindNext);add(search,"Find Previous",kFindPrevious);add(search,"Open Quickly…",kQuickOpen,'P');add(search,"Search Project…",kProjectSearch,'F',B_SHIFT_KEY);add(search,"Go to Line…",kGoToLine,'G');bar->AddItem(search);
     auto* git=new BMenu("Git");add(git,"Show Source Control",kToggleGit);add(git,"File History",kFileHistory);add(git,"Copy GitHub Permalink",kCopyPermalink,'L',B_SHIFT_KEY);git->AddSeparatorItem();add(git,"Refresh",kGitRefresh);add(git,"Fetch",kGitFetch);add(git,"Pull (Fast-forward Only)",kGitPull);add(git,"Push",kGitPush);bar->AddItem(git);
     auto* term=new BMenu("Terminal");add(term,"New Terminal",kNewTerminal,'T',B_SHIFT_KEY);add(term,"Close Terminal",kCloseTerminal);term->AddSeparatorItem();add(term,"Show / Hide",kToggleTerminal);bar->AddItem(term);
@@ -225,7 +226,7 @@ Workspace::Document* Workspace::ByID(int64 id) { for(auto& document:fDocuments) 
 void Workspace::Notice(const std::string& text) { fStatus->SetText(text.c_str());fStatus->SetToolTip(text.c_str()); }
 void Workspace::UpdateTabs() {
     std::vector<TabLabel> labels;
-    for(auto& d:fDocuments) labels.push_back({d->name+(d->external?" !":""),d->path,d->editor && d->editor->Dirty(),d->id});
+    for(auto& d:fDocuments) labels.push_back({d->name+(d->external?" !":""),d->path,d->editor && d->editor->Dirty(),d->id,FileIcon(d->path.empty()?d->name:d->path)});
     fTabs->SetTabs(std::move(labels),fSelected);UpdateStatus();
 }
 void Workspace::UpdateStatus() {
@@ -250,7 +251,7 @@ void Workspace::SelectTab(int index) {
 }
 void Workspace::NewFile() {
     auto document=std::make_unique<Document>();document->id=fNextID++;document->name="Untitled "+std::to_string(document->id);
-    document->editor=new Editor();document->editor->SetText("");document->editor->ApplyTheme(Theme::Builtins()[fThemeIndex]);document->view=document->editor;
+    document->editor=new Editor();document->editor->SetText("");document->editor->ApplySettings(fEditorSettings);document->view=document->editor;
     fDocumentsLayout->AddView(document->view);fDocuments.push_back(std::move(document));SelectTab(fDocuments.size()-1);
 }
 void Workspace::NewTerminal(bool focus) {
@@ -337,7 +338,7 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
             auto d=std::make_unique<Document>();d->id=fNextID++;d->path=path;d->name=fs::path(path).filename().string();d->stamp=loaded->data.stamp;
             if(loaded->image) {
                 d->view=new PreviewView(std::move(loaded->image),d->name,d->stamp.size);
-                static_cast<PreviewView*>(d->view)->ApplyTheme(Theme::Builtins()[fThemeIndex]);
+                static_cast<PreviewView*>(d->view)->ApplyTheme(Theme::Builtins()[fEditorSettings.theme]);
             } else {
                 d->editor=new Editor();d->view=d->editor;
                 bool binary=loaded->data.binary || !loaded->data.utf8;
@@ -349,7 +350,7 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
                     d->editor->Adopt(*loader,loaded->data.eol);
                 }
                 d->editor->SetLanguage(binary?"preview.txt":path,!binary && d->stamp.size>8*1024*1024);
-                d->editor->ApplyTheme(Theme::Builtins()[fThemeIndex]);
+                d->editor->ApplySettings(fEditorSettings);
             }
             auto* original=ByID(originalID);
             bool front=activate && focus==fFocusSerial && (!original || !original->editor || original->editor->Revision()==originalRevision);
@@ -477,17 +478,24 @@ bool Workspace::QuitRequested() {
     SaveSettings();be_app->PostMessage(B_QUIT_REQUESTED);return true;
 }
 void Workspace::ApplyTheme(int index) {
-    fThemeIndex=std::clamp(index,0,static_cast<int>(Theme::Builtins().size())-1);const auto& theme=Theme::Builtins()[fThemeIndex];
+    fEditorSettings.theme=std::clamp(index,0,static_cast<int>(Theme::Builtins().size())-1);const auto& theme=Theme::Builtins()[fEditorSettings.theme];
     for(int32 i=0;i<CountChildren();++i) ThemeView(ChildAt(i),theme);
     auto* filesTitle=static_cast<BStringView*>(FindView("files title"));
     BSize titleSize(filesTitle->StringWidth(filesTitle->Text())+2,B_SIZE_UNSET);
     filesTitle->SetExplicitMinSize(titleSize);filesTitle->SetExplicitMaxSize(titleSize);
-    fExplorer->ApplyTheme(theme);fRefresh->ApplyTheme(theme);fTabs->ApplyTheme(theme);fTerminal->ApplyTheme(theme);fGit->ApplyTheme(theme);
+    fExplorer->ApplyTheme(theme);fRefresh->ApplyTheme(theme);fTabs->ApplyTheme(theme);fTerminal->ApplyTheme(theme);fGit->ApplySettings(fEditorSettings);
     for(auto& d:fDocuments) {
-        if(d->editor) d->editor->ApplyTheme(theme);
+        if(d->editor) d->editor->ApplySettings(fEditorSettings);
         if(auto* preview=dynamic_cast<PreviewView*>(d->view)) preview->ApplyTheme(theme);
     }
+    MarkTheme(fThemes,fEditorSettings.theme);
+    if(fPreferencesWindow.IsValid()) { BMessage settings(kSyncPreferences);fEditorSettings.WriteTo(settings);fPreferencesWindow.SendMessage(&settings); }
     SaveSettings();
+}
+void Workspace::ShowPreferences() {
+    if(fPreferencesWindow.IsValid()) { fPreferencesWindow.SendMessage(kShowPreferences);return; }
+    auto* window=new PreferencesWindow(BMessenger(this),fEditorSettings,Frame());
+    fPreferencesWindow=BMessenger(window);window->Show();
 }
 void Workspace::ShowFind() {
     if(!fFindBar->IsHidden()) { fFindBar->Hide();if(Current() && Current()->editor) Current()->editor->MakeFocus();return; }
@@ -495,7 +503,7 @@ void Workspace::ShowFind() {
 }
 void Workspace::Search(bool search) {
     if(fProject.empty()) { Notice("Open a project folder first.");return; }
-    new SearchWindow(this,fProject,fIndex,search,Theme::Builtins()[fThemeIndex]);
+    new SearchWindow(this,fProject,fIndex,search,Theme::Builtins()[fEditorSettings.theme]);
 }
 void Workspace::PromptLine() { new PromptWindow(this,"Go to Line","Line or line:column",kGoToResult); }
 void Workspace::CopyPermalink() {
@@ -522,7 +530,7 @@ void Workspace::CopyPermalink() {
 void Workspace::RestoreSettings() {
     BFile file((fSettings+"/settings").c_str(),B_READ_ONLY);BMessage settings;
     settings.Unflatten(&file);fRestoring=true;
-    int32 theme=0;settings.FindInt32("theme",&theme);fThemeIndex=theme;
+    fEditorSettings.ReadFrom(settings);
     BRect frame;if(settings.FindRect("frame",&frame)==B_OK && frame.Width()>600 && frame.Height()>400) { MoveTo(frame.LeftTop());ResizeTo(frame.Width(),frame.Height()); }
     const char* project=nullptr;if(settings.FindString("project",&project)==B_OK && project && *project) OpenProject(project);
     const char* path=nullptr;
@@ -537,7 +545,7 @@ void Workspace::RestoreSettings() {
 }
 void Workspace::SaveSettings() {
     if(fRestoring) return;
-    BMessage settings;settings.AddInt32("theme",fThemeIndex);settings.AddRect("frame",Frame());settings.AddString("project",fProject.c_str());
+    BMessage settings;fEditorSettings.WriteTo(settings);settings.AddRect("frame",Frame());settings.AddString("project",fProject.c_str());
     if(auto* d=Current()) settings.AddString("selected",d->path.empty()?d->recoveryFile.c_str():d->path.c_str());
     for(const auto& d:fDocuments) if(!d->path.empty()) {
         settings.AddString("file",d->path.c_str());BMessage state;state.AddString("path",d->path.c_str());
@@ -579,7 +587,7 @@ void Workspace::RestoreDraft(const std::string& file) {
             auto d=std::make_unique<Document>();d->id=fNextID++;d->path=draft.path;d->name=draft.name;d->stamp=draft.base;d->bom=draft.bom;
             d->recoveryFile=file;d->external=!d->path.empty() && StatFile(d->path)!=d->stamp;
             d->editor=new Editor();d->view=d->editor;d->editor->Adopt(*loader,draft.eol);d->editor->MarkRecovered();
-            d->editor->SetLanguage(d->path,d->editor->SendMessage(SCI_GETLENGTH)>8*1024*1024);d->editor->ApplyTheme(Theme::Builtins()[fThemeIndex]);
+            d->editor->SetLanguage(d->path,d->editor->SendMessage(SCI_GETLENGTH)>8*1024*1024);d->editor->ApplySettings(fEditorSettings);
             d->recoveryRevision=d->editor->Revision();d->lastRecovery=system_time();
             fDocumentsLayout->AddView(d->view);fDocuments.push_back(std::move(d));
             fDocuments.back()->editor->SendMessage(SCI_SETSEL,draft.anchor,draft.caret);fDocuments.back()->editor->SendMessage(SCI_SETFIRSTVISIBLELINE,draft.firstLine);
@@ -735,7 +743,14 @@ void Workspace::MessageReceived(BMessage* message) {
             } else if(focus) focus->MessageReceived(message);
             break;
         }
-        case kTheme: { int32 index;if(message->FindInt32("index",&index)==B_OK) ApplyTheme(index);break; }
+        case kShowPreferences:ShowPreferences();break;
+        case kApplyPreferences:fEditorSettings.ReadFrom(*message);ApplyTheme(fEditorSettings.theme);break;
+        case kTheme: {
+            const char* name;int32 index;
+            if(message->FindString("theme_name",&name)==B_OK) ApplyTheme(ThemeIndex(name));
+            else if(message->FindInt32("index",&index)==B_OK) ApplyTheme(index);
+            break;
+        }
         case kToggleTerminal:
             if(fTerminal->Empty()) NewTerminal();
             else {

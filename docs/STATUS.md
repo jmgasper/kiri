@@ -1,4 +1,4 @@
-# Beta 2 verification record
+# Beta 3 verification record
 
 Verified September 13, 2026 on Haiku R1/beta5 x86_64, hrev57937+113, in
 QEMU/KVM with 4 vCPUs and 4 GiB RAM. Native build: GCC 13.3, Scintilla 5.3.4,
@@ -14,14 +14,29 @@ Lexilla 5.4.6. Portable core also built and tested with Linux GCC 13.3.
   and graph lanes; GitHub immutable line/range mapping and boundaries; ignore-aware indexing
   and search; terminal escape handling and real PTY shells including Ctrl+D,
   independent directories and variables, and closing one shell while another runs.
-- **34 native editor, file and worker checks pass.** C++/JSON token styles,
+- **190 native editor, file and worker checks pass.** C++/JSON token styles,
   Unicode navigation, dirty state, undo, current-match and all-match replacement,
-  three themes, streamed document adoption, text/binary Haiku attribute
+  ten themes (five dark and five light), text/syntax contrast, installed font
+  selection and size, settings round trips and legacy defaults, invalid settings
+  fallback, unchanged text/selection/dirty state during appearance changes,
+  native MIME icons, streamed document adoption, text/binary Haiku attribute
   preservation during saves and cancellation of superseded work.
 - The native performance fixture adds checks for the 200 MiB document's byte
   and line counts and a 100,001-file index. See [measurements](PERFORMANCE.md).
 
 ## Observed native interaction
+
+Beta 3 used another isolated application signature and settings directory so
+the existing Kiri sessions could remain open. **Edit → Preferences** / Alt+,
+opened the native preferences window with installed fonts, numeric size input,
+five dark and five light choices, and a syntax-highlighted code preview.
+An invalid size disabled Apply/OK and showed an explanation. Applying Bitstream
+Charter at 18 points with Linen updated existing files, a new document and Git
+diffs. Cancel retained the applied values, and a fresh application process
+restored all three choices. Restore Defaults previewed the system fixed font
+at 13 points with Obsidian and applied those defaults when requested.
+The file tree and document tabs displayed native folder, source, text and HTML
+icons; automated checks also covered images, archives, PDF, audio and unknown files.
 
 Beta 2 was exercised in a separate application instance with its own settings
 and disposable project, alongside an existing session with unsaved edits.
@@ -36,11 +51,12 @@ either the unsaved prompt or Save As retained the remaining dirty tabs, and
 saving afterwards did not close them. Closing the last terminal while Git was
 visible returned keyboard focus to Git without editing a hidden document.
 The broader Git, recovery and performance observations below were established
-in beta 1; beta 2 reran both automated suites and the tab interactions above.
+in beta 1. Beta 2 reran both automated suites and the tab interactions above;
+beta 3 reran the portable suite and expanded native checks for preferences and icons.
 
 | Area | Evidence |
 | --- | --- |
-| Workspace | Native toolbar, file tree, resizable panels, scrolling tabs, keyboard navigation, line gutter and three color themes. |
+| Workspace | Native toolbar, file tree, resizable panels, scrolling tabs, keyboard navigation, line gutter, file-type icons and ten color themes. |
 | Source files | C++, HTML, JSON, XML and Python render with highlighting; go to line and project-search navigation reach the requested location. |
 | Editing and saving | Native Save As, existing-file save, consecutive untitled files through Save All, clipboard and undo/redo. Cancelling quit after an earlier Discard leaves both remaining documents dirty. |
 | Recovery | Force-killed Kiri with an unsaved two-line draft, restarted it, verified the text and dirty state, then saved it and confirmed draft cleanup. |
@@ -66,7 +82,8 @@ very-long-line performance, giant flat directories and low-memory operation
 remain separate measurement work. Native CMake builds are supplied but the
 tested release build uses the Makefile.
 
-Screenshots show the [workspace](screenshots/workspace.png),
+Screenshots show [editor preferences](screenshots/preferences.png), the
+[ten-theme menu](screenshots/preferences-themes.png), the [workspace](screenshots/workspace.png),
 [Git history and diff](screenshots/git.png), [image preview](screenshots/image.png)
 and [Daylight theme](screenshots/daylight.png) in the running Haiku application.
 VM state, test repositories, recovery crash diagnostics and test

@@ -4,7 +4,7 @@ A native C++ project editor for Haiku, with a file tree, source editing, an
 embedded terminal and a Git workspace. Kiri uses Haiku's Interface Kit,
 Scintilla, Lexilla and libvterm. There is no browser or web UI runtime.
 
-**0.1.0 beta 2** builds and runs on Haiku R1/beta5 x86_64. The application has
+**0.1.0 beta 3** builds and runs on Haiku R1/beta5 x86_64. The application has
 been exercised in QEMU/KVM, including real editing, staging and committing,
 crash recovery, image previews and a 200 MiB document. See the
 [verification record](docs/STATUS.md) and [performance measurements](docs/PERFORMANCE.md).
@@ -16,7 +16,7 @@ crash recovery, image previews and a 200 MiB document. See the
 Install the package from `artifacts/` on Haiku:
 
 ```sh
-pkgman install ./artifacts/kiri-0.1.0~beta2-2-x86_64.hpkg
+pkgman install ./artifacts/kiri-0.1.0~beta3-1-x86_64.hpkg
 /boot/system/apps/Kiri /path/to/project
 ```
 
@@ -45,6 +45,8 @@ the native release artifact is built with the Makefile.
 - **Open Folder** sets the lazy file tree, project index, Git repository and
   terminal directory. Expand folders and double-click files to open them.
   The refresh icon beside **FILES** picks up files created outside Kiri.
+  The tree and document tabs show Haiku's native icons for source files, text,
+  web pages, images, archives and other basic file types, with a generic fallback.
 - Tabs show unsaved dots and close controls. Scroll the tab strip to reveal
   additional documents. Right-click any document or terminal tab for **Close all**
   and **Close others**; the latter keeps the tab you clicked. Unsaved documents
@@ -53,7 +55,14 @@ the native release artifact is built with the Makefile.
   indentation, line numbers, wrapping, zoom, find/replace and go to line.
 - **Open Quickly** searches file paths. **Search Project** finds literal text
   and opens a result at its line and column. Newer queries cancel older work.
-- **View → Color Theme** selects Obsidian, Daylight or Nord. Theme, window,
+- **Edit → Preferences…** (Alt+,) opens editor preferences. Choose an installed
+  font, a size from 8 to 48 points, and a theme with a live code preview.
+  **Apply** or **OK** updates open files, new documents and Git diffs; **Cancel**
+  discards unapplied choices, and **Restore Defaults** previews the original
+  font, size and theme. Preferences persist between sessions.
+- Five dark themes are available: **Obsidian, Nord, Midnight, Forest and Ember**.
+  Five light themes are available: **Daylight, Linen, Glacier, Rose and Meadow**.
+  **View → Color Theme** also changes the theme directly. Window position,
   open saved files, selections and scroll positions persist between sessions.
 - Lexilla supplies highlighting for C/C++, Python, JavaScript/TypeScript, HTML,
   JSON, XML, CSS, Java, C#, Rust, shell, SQL, Markdown, YAML, TOML, and more.
@@ -138,7 +147,7 @@ cmake --build build-host -j8
 ctest --test-dir build-host --output-on-failure
 ```
 
-The current suites pass **163 core checks** and **34 Haiku editor/file/worker checks**.
+The current suites pass **163 core checks** and **190 Haiku editor/file/worker checks**.
 Native visual and interaction checks are recorded separately in
 [STATUS.md](docs/STATUS.md). The isolated VM and build workflow is documented in
 [VM.md](docs/VM.md); machine state and SSH keys are ignored by Git.

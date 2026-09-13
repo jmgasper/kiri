@@ -6,6 +6,7 @@ enum : uint32 {
     kNewFile='newf', kSave='save', kSaveAs='svas', kSaveChosen='svch', kSaveAll='sval',
     kCloseTab='cltb', kSelectTab='sltb', kEditorChanged='edch', kEditorPosition='edps',
     kCloseAllTabs='clat', kCloseOtherTabs='clot',
+    kShowPreferences='pref', kApplyPreferences='eprf', kSyncPreferences='epsy',
     kTheme='them', kToggleTerminal='tote', kToggleSidebar='tosi', kToggleGit='togi',
     kRefresh='refr', kFind='find', kFindNext='fnxt', kFindPrevious='fprv', kReplace='repl',
     kReplaceAll='rpal', kGoToLine='gtln', kGoToResult='gtrs', kQuickOpen='qkop',

@@ -31,7 +31,7 @@ $(BUILD)/kiri_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/tests/CoreTests.o
 	$(CXX) -o $@ $^ -lbe
 check: $(BUILD)/kiri_tests
 	$(BUILD)/kiri_tests
-$(BUILD)/kiri_native_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/src/ui/Editor.o $(BUILD)/src/ui/Theme.o $(BUILD)/tests/NativeTests.o
+$(BUILD)/kiri_native_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/src/ui/Editor.o $(BUILD)/src/ui/Theme.o $(BUILD)/src/ui/EditorSettings.o $(BUILD)/src/ui/FileIcons.o $(BUILD)/tests/NativeTests.o
 	$(CXX) -o $@ $^ $(LIBS)
 check-native: $(BUILD)/kiri_native_tests
 	$(BUILD)/kiri_native_tests

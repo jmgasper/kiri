@@ -6,7 +6,9 @@
 #include <Window.h>
 namespace kiri {
 FileItem::FileItem(DirectoryEntry value,uint32 level,bool isPlaceholder)
-    :BListItem(level,false),entry(std::move(value)),placeholder(isPlaceholder) {}
+    :BListItem(level,false),entry(std::move(value)),placeholder(isPlaceholder) {
+    if(!placeholder) fIcon=FileIcon(entry.path,entry.directory);
+}
 void FileItem::Update(BView* owner,const BFont* font) { BListItem::Update(owner,font);SetHeight(25); }
 void FileItem::DrawItem(BView* owner,BRect rect,bool) {
     const auto& t=static_cast<Explorer*>(owner)->Colors();
@@ -14,7 +16,11 @@ void FileItem::DrawItem(BView* owner,BRect rect,bool) {
     owner->SetLowColor(IsSelected()?t.selection:t.panel);
     float x=rect.left+5,y=rect.top+6;
     owner->SetHighColor(entry.directory?t.accent:t.muted);
-    if(entry.directory) { owner->FillRoundRect(BRect(x,y+3,x+13,y+12),2,2);owner->FillRect(BRect(x+1,y,x+6,y+4)); }
+    if(fIcon) {
+        owner->PushState();owner->SetDrawingMode(B_OP_ALPHA);owner->SetBlendingMode(B_PIXEL_ALPHA,B_ALPHA_OVERLAY);
+        owner->DrawBitmap(fIcon.get(),BPoint(x,rect.top+4));owner->PopState();
+    }
+    else if(entry.directory) { owner->FillRoundRect(BRect(x,y+3,x+13,y+12),2,2);owner->FillRect(BRect(x+1,y,x+6,y+4)); }
     else if(!placeholder) { owner->StrokeRect(BRect(x+2,y,x+11,y+13));owner->StrokeLine(BPoint(x+4,y+5),BPoint(x+9,y+5)); }
     owner->SetHighColor(placeholder?t.muted:t.text);
     BString label(entry.name.c_str());owner->TruncateString(&label,B_TRUNCATE_MIDDLE,rect.Width()-29);
@@ -23,6 +29,7 @@ void FileItem::DrawItem(BView* owner,BRect rect,bool) {
 Explorer::Explorer():BOutlineListView("files",B_SINGLE_SELECTION_LIST,B_WILL_DRAW|B_NAVIGABLE|B_FRAME_EVENTS) {
     SetExplicitMinSize(BSize(150,100));SetInvocationMessage(new BMessage(kOpenFile));
 }
+Explorer::~Explorer() { Clear(); }
 void Explorer::Clear() {
     std::vector<BListItem*> items;
     for(int32 i=0;i<FullListCountItems();++i) items.push_back(FullListItemAt(i));

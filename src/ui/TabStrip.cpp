@@ -10,7 +10,7 @@ TabStrip::TabStrip(const char* name,TabActions actions,const char* createLabel)
     :BView(name,B_WILL_DRAW|B_FULL_UPDATE_ON_RESIZE|B_FRAME_EVENTS),fActions(actions),fCreateLabel(createLabel) {
     SetExplicitMinSize(BSize(80,34));SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED,34));
 }
-float TabStrip::Width(size_t index) const { return std::clamp(StringWidth(fTabs[index].name.c_str())+54,100.f,240.f); }
+float TabStrip::Width(size_t index) const { return std::clamp(StringWidth(fTabs[index].name.c_str())+(fTabs[index].icon?74:54),100.f,260.f); }
 float TabStrip::AvailableWidth() const { return std::max(0.f,Bounds().Width()-(fActions.create?34:0)); }
 BRect TabStrip::NewButtonRect() const {
     float total=0;for(size_t i=0;i<fTabs.size();++i) total+=Width(i);
@@ -49,7 +49,12 @@ void TabStrip::Draw(BRect) {
         if(selected) { SetHighColor(fTheme.accent);FillRect(BRect(x,0,x+width-1,2)); }
         SetHighColor(fTheme.border);StrokeLine(rect.RightTop(),rect.RightBottom());
         SetLowColor(selected?fTheme.background:fTheme.toolbar);SetHighColor(selected?fTheme.text:fTheme.muted);
-        BString name(fTabs[i].name.c_str());TruncateString(&name,B_TRUNCATE_MIDDLE,width-50);DrawString(name.String(),BPoint(x+14,22));
+        float labelX=x+14;
+        if(fTabs[i].icon) {
+            PushState();SetDrawingMode(B_OP_ALPHA);SetBlendingMode(B_PIXEL_ALPHA,B_ALPHA_OVERLAY);
+            DrawBitmap(fTabs[i].icon.get(),BPoint(x+10,9));PopState();labelX+=20;
+        }
+        BString name(fTabs[i].name.c_str());TruncateString(&name,B_TRUNCATE_MIDDLE,width-(fTabs[i].icon?70:50));DrawString(name.String(),BPoint(labelX,22));
         if(fTabs[i].dirty) FillEllipse(BPoint(x+width-17,17),3,3);
         else { StrokeLine(BPoint(x+width-21,13),BPoint(x+width-13,21));StrokeLine(BPoint(x+width-13,13),BPoint(x+width-21,21)); }
         x+=width;

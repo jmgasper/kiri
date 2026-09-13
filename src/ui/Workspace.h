@@ -4,6 +4,7 @@
 #include "core/Recovery.h"
 #include "ui/Async.h"
 #include "ui/Theme.h"
+#include "ui/EditorSettings.h"
 #include <Window.h>
 #include <memory>
 #include <set>
@@ -52,6 +53,7 @@ private:
     void SaveTo(int64 id,const std::string& path);
     void ContinueSaveAll();
     void ApplyTheme(int index);
+    void ShowPreferences();
     void ShowFind();
     void Search(bool projectSearch);
     void PromptLine();
@@ -83,7 +85,10 @@ private:
     int64 fSavePanelToken=0;
     int64 fFocusSerial=0;
     bool fSavePanelAccepted=false;
-    int fSelected=-1,fThemeIndex=0;
+    int fSelected=-1;
+    EditorSettings fEditorSettings;
+    BMessenger fPreferencesWindow;
+    BMenu* fThemes;
     bool fQuitWhenSaved=false,fDiskCheckPending=false;
     std::map<int64,int64> fQuitDiscarded;
     std::deque<int64> fSaveQueue;

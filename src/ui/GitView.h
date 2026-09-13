@@ -6,7 +6,7 @@
 #include <memory>
 class BListView;class BStringView;class BTextControl;class BButton;class BTabView;
 namespace kiri {
-class Editor;
+class Editor;struct EditorSettings;
 class GitView:public BView {
 public:
     GitView();
@@ -15,6 +15,7 @@ public:
     void MessageReceived(BMessage* message) override;
     void SetRepository(std::string root,const std::string& error={});
     void ApplyTheme(const Theme& theme);
+    void ApplySettings(const EditorSettings& settings);
     void Refresh();
     void ShowFileHistory(const std::string& path);
     const std::string& Root() const { return fRoot; }

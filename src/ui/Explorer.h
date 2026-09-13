@@ -2,6 +2,7 @@
 #include <OutlineListView.h>
 #include "core/Project.h"
 #include "ui/Theme.h"
+#include "ui/FileIcons.h"
 #include <functional>
 #include <set>
 namespace kiri {
@@ -12,10 +13,13 @@ public:
     void Update(BView* owner,const BFont* font) override;
     DirectoryEntry entry;
     bool loaded=false,placeholder=false;
+private:
+    std::shared_ptr<const BBitmap> fIcon;
 };
 class Explorer:public BOutlineListView {
 public:
     Explorer();
+    ~Explorer() override;
     void MouseDown(BPoint where) override;
     void KeyDown(const char* bytes,int32 count) override;
     void MessageReceived(BMessage* message) override;

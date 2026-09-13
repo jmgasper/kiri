@@ -1,18 +1,23 @@
 #include "ui/Editor.h"
 #include "ui/Async.h"
+#include "ui/FileIcons.h"
 #include "core/FileIO.h"
 #include "core/Project.h"
 #include <Application.h>
+#include <Bitmap.h>
+#include <Font.h>
 #include <LayoutBuilder.h>
 #include <Window.h>
 #include <OS.h>
 #include <SciLexer.h>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <thread>
 #include <stdexcept>
+#include <set>
 #include <unistd.h>
 #include <fcntl.h>
 #include <fs_attr.h>
@@ -21,6 +26,57 @@ namespace fs=std::filesystem;
 static int checks=0;
 #define CHECK(x) do { ++checks;if(!(x)) throw std::runtime_error(std::string(__FILE__)+":"+std::to_string(__LINE__)+": " #x); } while(false)
 static uint64_t Resident() { ssize_t cookie=0;area_info area{};uint64_t total=0;while(get_next_area_info(getpid(),&cookie,&area)==B_OK) total+=area.ram_size;return total; }
+static double Luminance(rgb_color color) {
+    auto channel=[](uint8 value) { double c=value/255.0;return c<=.04045?c/12.92:std::pow((c+.055)/1.055,2.4); };
+    return .2126*channel(color.red)+.7152*channel(color.green)+.0722*channel(color.blue);
+}
+static double Contrast(rgb_color a,rgb_color b) {
+    double first=Luminance(a),second=Luminance(b);
+    return (std::max(first,second)+.05)/(std::min(first,second)+.05);
+}
+static void Preferences(Editor* editor) {
+    EditorSettings defaults,settings;
+    font_family family;be_plain_font->GetFamilyAndStyle(&family,nullptr);
+    settings.fontFamily=family;settings.fontSize=18;settings.theme=ThemeIndex("Linen");settings.Normalize();
+    BMessage stored;settings.WriteTo(stored);EditorSettings restored;restored.ReadFrom(stored);CHECK(restored==settings);
+    BMessage legacy;legacy.AddInt32("theme",1);restored=defaults;restored.ReadFrom(legacy);
+    CHECK(Theme::Builtins()[restored.theme].name=="Daylight" && restored.fontFamily==defaults.fontFamily && restored.fontSize==defaults.fontSize);
+    BMessage invalid;invalid.AddString("editor_font_family","No such Kiri test font");invalid.AddInt32("editor_font_size",-1);invalid.AddInt32("theme",1000);
+    restored.ReadFrom(invalid);CHECK(restored.fontFamily==defaults.fontFamily && restored.fontSize==8 && restored.theme==0);
+    invalid.MakeEmpty();invalid.AddInt32("editor_font_size",1000);restored.ReadFrom(invalid);CHECK(restored.fontSize==48);
+    int dark=0,light=0;std::set<std::string> names;
+    auto text=editor->Text();auto revision=editor->Revision();auto dirty=editor->Dirty();
+    editor->SendMessage(SCI_SETSEL,2,7);
+    for(size_t i=0;i<Theme::Builtins().size();++i) {
+        const auto& theme=Theme::Builtins()[i];theme.dark?++dark:++light;names.insert(theme.name);
+        CHECK(Contrast(theme.text,theme.background)>=7);
+        for(auto color:{theme.comment,theme.keyword,theme.string,theme.number,theme.type,theme.added,theme.removed}) CHECK(Contrast(color,theme.background)>=3);
+        settings.theme=i;editor->ApplySettings(settings);
+        CHECK(editor->SendMessage(SCI_STYLEGETBACK,STYLE_DEFAULT)==SciColor(theme.background));
+        CHECK(editor->SendMessage(SCI_STYLEGETFORE,STYLE_DEFAULT)==SciColor(theme.text));
+        CHECK(editor->SendMessage(SCI_STYLEGETSIZE,STYLE_DEFAULT)==18);
+        char actual[B_FONT_FAMILY_LENGTH+1]{};editor->SendMessage(SCI_STYLEGETFONT,STYLE_DEFAULT,reinterpret_cast<sptr_t>(actual));
+        CHECK(std::string(actual)==family);
+        CHECK(editor->Text()==text && editor->Revision()==revision && editor->Dirty()==dirty);
+        CHECK(editor->SendMessage(SCI_GETANCHOR)==2 && editor->SendMessage(SCI_GETCURRENTPOS)==7);
+    }
+    CHECK(dark==5 && light==5 && names.size()==10);
+    editor->SetLanguage("appearance.cpp");
+    CHECK(editor->SendMessage(SCI_STYLEGETSIZE,SCE_C_WORD)==18);
+    editor->ApplySettings(defaults);
+    CHECK(editor->SendMessage(SCI_STYLEGETSIZE,STYLE_DEFAULT)==13);
+}
+static void Icons() {
+    std::set<std::string> bitmaps;
+    for(const char* file:{"main.cpp","index.html","notes.txt","photo.png","archive.zip","report.pdf","track.mp3","data.bin"}) {
+        auto icon=FileIcon(file);CHECK(icon && icon->InitCheck()==B_OK && icon->Bounds()==BRect(0,0,15,15));
+        bitmaps.emplace(static_cast<const char*>(icon->Bits()),icon->BitsLength());
+    }
+    CHECK(bitmaps.size()>=4);
+    CHECK(FileIcon("one.cpp")==FileIcon("two.CPP"));
+    CHECK(FileIcon("one",true) && FileIcon("one",true)==FileIcon("two",true));
+    CHECK(FileIcon("unknown.kiri-test-extension"));
+}
 static void Fixtures(const std::string& root) {
     if(fs::exists(root)) throw std::runtime_error("Fixture directory must be new.");
     fs::create_directories(root);
@@ -77,7 +133,7 @@ int main(int argc,char** argv) {
         editor->SetText("{\"key\": true, \"n\": 42}\n");editor->SetLanguage("test.json");editor->SendMessage(SCI_COLOURISE,0,-1);
         CHECK(editor->SendMessage(SCI_GETSTYLEAT,3)==SCE_JSON_PROPERTYNAME);CHECK(editor->SendMessage(SCI_GETSTYLEAT,8)==SCE_JSON_KEYWORD);
         editor->MarkRecovered();CHECK(editor->Dirty());editor->MarkSaved();CHECK(!editor->Dirty());
-        for(const auto& theme:Theme::Builtins()) { editor->ApplyTheme(theme);CHECK(editor->SendMessage(SCI_STYLEGETBACK,STYLE_DEFAULT)==SciColor(theme.background)); }
+        Preferences(editor);Icons();
         auto loader=editor->CreateLoader(true);CHECK(loader->loader);
         std::thread loading([&]{CHECK(loader->loader->AddData("first\r\nsecond\r\n",15)==SC_STATUS_OK);});loading.join();editor->Adopt(*loader,0);
         CHECK(editor->Text()=="first\r\nsecond\r\n");CHECK(editor->SendMessage(SCI_GETLINECOUNT)==3);CHECK(!editor->Dirty());CHECK(editor->SendMessage(SCI_GETDOCUMENTOPTIONS)&SC_DOCUMENTOPTION_STYLES_NONE);

@@ -83,9 +83,8 @@ void Editor::Style(int id,rgb_color color,bool bold) {
 }
 void Editor::ApplyTheme(const Theme& t) {
     fTheme=t;
-    font_family family;font_style style;be_fixed_font->GetFamilyAndStyle(&family,&style);
-    SendMessage(SCI_STYLESETFONT,STYLE_DEFAULT,reinterpret_cast<sptr_t>(family));
-    SendMessage(SCI_STYLESETSIZE,STYLE_DEFAULT,13);
+    SendMessage(SCI_STYLESETFONT,STYLE_DEFAULT,reinterpret_cast<sptr_t>(fSettings.fontFamily.c_str()));
+    SendMessage(SCI_STYLESETSIZE,STYLE_DEFAULT,fSettings.fontSize);
     SendMessage(SCI_STYLESETFORE,STYLE_DEFAULT,SciColor(t.text));
     SendMessage(SCI_STYLESETBACK,STYLE_DEFAULT,SciColor(t.background));
     SendMessage(SCI_STYLECLEARALL);
@@ -138,7 +137,17 @@ void Editor::ApplyTheme(const Theme& t) {
             else if(has("operator")) Style(s,t.accent);
         }
     }
-    Invalidate();
+    UpdateMarginWidth();Invalidate();
+}
+void Editor::ApplySettings(const EditorSettings& settings) {
+    fSettings=settings;
+    ApplyTheme(Theme::Builtins()[settings.theme]);
+}
+void Editor::UpdateMarginWidth() {
+    fDigits=std::to_string(SendMessage(SCI_GETLINECOUNT)).size();
+    std::string digits(std::max(3,fDigits),'9');
+    auto width=SendMessage(SCI_TEXTWIDTH,STYLE_LINENUMBER,reinterpret_cast<sptr_t>(digits.c_str()));
+    SendMessage(SCI_SETMARGINWIDTHN,0,std::max<sptr_t>(48,width+16));
 }
 void Editor::SetLanguage(const std::string& path,bool large) {
     auto name=std::filesystem::path(path).filename().string();
@@ -231,10 +240,11 @@ void Editor::NotificationReceived(SCNotification* n) {
     } else if(n->nmhdr.code==SCN_UPDATEUI) {
         BMessage msg(kEditorPosition);msg.AddPointer("editor",this);Window()->PostMessage(&msg);
         int digits=std::to_string(SendMessage(SCI_GETLINECOUNT)).size();
-        if(digits!=fDigits) { fDigits=digits;SendMessage(SCI_SETMARGINWIDTHN,0,std::max(48,14+digits*10)); }
+        if(digits!=fDigits) UpdateMarginWidth();
         auto caret=SendMessage(SCI_GETCURRENTPOS);auto match=caret>0?SendMessage(SCI_BRACEMATCH,caret-1):-1;
         SendMessage(SCI_BRACEHIGHLIGHT,match>=0?caret-1:-1,match);
-    } else if(n->nmhdr.code==SCN_MARGINCLICK && n->margin==1)
+    } else if(n->nmhdr.code==SCN_ZOOM) UpdateMarginWidth();
+    else if(n->nmhdr.code==SCN_MARGINCLICK && n->margin==1)
         SendMessage(SCI_TOGGLEFOLD,SendMessage(SCI_LINEFROMPOSITION,n->position));
     else if(n->nmhdr.code==SCN_CHARADDED && n->ch=='\n') {
         auto line=SendMessage(SCI_LINEFROMPOSITION,SendMessage(SCI_GETCURRENTPOS));
