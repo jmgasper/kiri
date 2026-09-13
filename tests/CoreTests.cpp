@@ -158,9 +158,30 @@ void Terminal() {
     }
     CHECK(!session.Running());session.Stop();CHECK(!session.Running());
 }
+void TerminalIsolation() {
+    Temporary firstDirectory,secondDirectory;PtySession first,second;
+    CHECK(first.Start(firstDirectory.path,24,80).empty());
+    CHECK(second.Start(secondDirectory.path,24,80).empty());
+    auto exchange=[](PtySession& session,const std::string& command,const std::string& expected) {
+        if(!session.Write(command.data(),command.size())) return false;
+        std::string output;char buffer[4096];auto start=std::chrono::steady_clock::now();
+        while(std::chrono::steady_clock::now()-start<std::chrono::seconds(5)) {
+            auto count=session.Read(buffer,sizeof(buffer));if(count<0) return false;
+            if(count>0) output.append(buffer,count);
+            if(output.find(expected)!=std::string::npos) return true;
+        }
+        std::cerr<<"Expected terminal output: "<<expected<<"\nReceived: "<<output<<'\n';
+        return false;
+    };
+    CHECK(exchange(first,"KIRI_TAB=first; printf 'KIRI_%s:%s:%s\\n' READY \"$KIRI_TAB\" \"$PWD\"\n","KIRI_READY:first:"+CanonicalPath(firstDirectory.path)));
+    CHECK(exchange(second,"KIRI_TAB=second; printf 'KIRI_%s:%s:%s\\n' READY \"$KIRI_TAB\" \"$PWD\"\n","KIRI_READY:second:"+CanonicalPath(secondDirectory.path)));
+    first.Stop();CHECK(!first.Running());CHECK(second.Running());
+    CHECK(exchange(second,"printf 'KIRI_%s:%s\\n' SURVIVED \"$KIRI_TAB\"\n","KIRI_SURVIVED:second"));
+    second.Stop();CHECK(!second.Running());
+}
 int main() {
     signal(SIGPIPE,SIG_IGN);
-    try { Processes();Files();LinksAndGraph();GitIntegration();Terminal();Recovery(); }
+    try { Processes();Files();LinksAndGraph();GitIntegration();Terminal();TerminalIsolation();Recovery(); }
     catch(const std::exception& e) { std::cerr<<e.what()<<'\n';return 1; }
     std::cout<<"Passed "<<checks<<" checks: processes, safe saves, Git, project search and real PTY terminal.\n";
 }

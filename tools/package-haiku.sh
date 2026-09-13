@@ -9,10 +9,13 @@ mkdir -p "$KIRI_STAGE/apps" "$KIRI_STAGE/documentation/packages/kiri/vendor/libv
     "$KIRI_STAGE/data/deskbar/menu/Applications" "$KIRI_ROOT/artifacts"
 cp build-haiku/Kiri "$KIRI_STAGE/apps/Kiri"
 strip --strip-debug "$KIRI_STAGE/apps/Kiri"
+# GNU strip removes the appended Haiku resources; restore the application
+# signature, supported types and version on the release executable.
+xres -o "$KIRI_STAGE/apps/Kiri" build-haiku/Kiri.rsrc
 cp resources/Kiri.PackageInfo "$KIRI_STAGE/.PackageInfo"
 cp README.md LICENSE "$KIRI_STAGE/documentation/packages/kiri/"
 cp -R docs "$KIRI_STAGE/documentation/packages/kiri/"
 cp vendor/libvterm/LICENSE vendor/libvterm/UPSTREAM.md "$KIRI_STAGE/documentation/packages/kiri/vendor/libvterm/"
 ln -s ../../../../apps/Kiri "$KIRI_STAGE/data/deskbar/menu/Applications/Kiri"
-package create -C "$KIRI_STAGE" "$KIRI_ROOT/artifacts/kiri-0.1.0~beta1-1-x86_64.hpkg"
-printf '%s\n' "$KIRI_ROOT/artifacts/kiri-0.1.0~beta1-1-x86_64.hpkg"
+package create -C "$KIRI_STAGE" "$KIRI_ROOT/artifacts/kiri-0.1.0~beta2-2-x86_64.hpkg"
+printf '%s\n' "$KIRI_ROOT/artifacts/kiri-0.1.0~beta2-2-x86_64.hpkg"

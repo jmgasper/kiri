@@ -23,6 +23,7 @@ public:
     void MakeFocus(bool focus=true) override;
     void Start(const std::string& directory);
     void ApplyTheme(const Theme& theme);
+    bool Exited() const { return fExited.load(); }
 private:
     void Stop();
     void FlushInput();
@@ -40,6 +41,7 @@ private:
     float fCellWidth=8,fCellHeight=18,fAscent=13;
     int fScrollOffset=0,fSelectionStart=-1,fSelectionEnd=-1;
     bool fSelecting=false;
+    bool fExitReported=false;
     Theme fTheme=Theme::Builtins()[0];
 };
 }

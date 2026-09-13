@@ -25,7 +25,7 @@ void TerminalView::Stop() {
     fStop=true;if(fWorker.joinable()) fWorker.join();fSession.Stop();
 }
 void TerminalView::Start(const std::string& directory) {
-    Stop();fDirectory=directory;fStop=false;fExited=false;
+    Stop();fDirectory=directory;fStop=false;fExited=false;fExitReported=false;
     fModel.Reset();fScrollOffset=0;fSelectionStart=fSelectionEnd=-1;ApplyTheme(fTheme);
     { std::lock_guard<std::mutex> guard(fMutex);fIncoming.clear();fOutgoing.clear(); }
     auto error=fSession.Start(directory,fModel.Rows(),fModel.Columns());
@@ -69,6 +69,7 @@ void TerminalView::Tick() {
     std::string input;
     { std::lock_guard<std::mutex> guard(fMutex);input=fIncoming.substr(0,256*1024);fIncoming.erase(0,input.size()); }
     if(!input.empty()) { fModel.Feed(input.data(),input.size());FlushInput();Invalidate(); }
+    if(fExited && !fExitReported) { fExitReported=true;Window()->PostMessage(kTerminalState);Invalidate(); }
 }
 void TerminalView::Draw(BRect update) {
     SetHighColor(fTheme.background);FillRect(update);
@@ -96,7 +97,7 @@ void TerminalView::Draw(BRect update) {
         BRect caret(8+cursor.col*fCellWidth,6+cursor.row*fCellHeight,8+(cursor.col+1)*fCellWidth-1,6+(cursor.row+1)*fCellHeight-1);
         if(IsFocus()) FillRect(BRect(caret.left,caret.top,caret.left+1,caret.bottom));else StrokeRect(caret);
     }
-    if(fExited) { SetHighColor(fTheme.muted);DrawString("Shell exited · use Terminal > Restart",BPoint(10,Bounds().bottom-5)); }
+    if(fExited) { SetHighColor(fTheme.muted);DrawString("Shell exited · use + to open a new terminal",BPoint(10,Bounds().bottom-5)); }
 }
 void TerminalView::KeyDown(const char* bytes,int32 count) {
     if(count<=0) return;
@@ -146,7 +147,10 @@ void TerminalView::MouseMoved(BPoint where,uint32,const BMessage*) {
     if(fSelecting) { fSelectionEnd=std::clamp(static_cast<int>((where.y-6)/fCellHeight),0,fModel.Rows()-1);Invalidate(); }
 }
 void TerminalView::MouseUp(BPoint) { fSelecting=false; }
-void TerminalView::MakeFocus(bool focus) { BView::MakeFocus(focus);Invalidate(); }
+void TerminalView::MakeFocus(bool focus) {
+    bool changed=focus && !IsFocus();BView::MakeFocus(focus);Invalidate();
+    if(changed && Window()) Window()->PostMessage(kTerminalFocus);
+}
 void TerminalView::Copy() {
     if(fSelectionStart<0) return;
     auto text=fModel.Text(std::min(fSelectionStart,fSelectionEnd),std::max(fSelectionStart,fSelectionEnd),fScrollOffset);
@@ -164,7 +168,6 @@ void TerminalView::MessageReceived(BMessage* message) {
     if(message->what==kTerminalTick) Tick();
     else if(message->what==B_COPY) Copy();
     else if(message->what==B_PASTE) Paste();
-    else if(message->what==kTerminalRestart) Start(fDirectory);
     else if(message->what==B_MOUSE_WHEEL_CHANGED) {
         float dy=0;message->FindFloat("be:wheel_delta_y",&dy);
         fScrollOffset=std::clamp(fScrollOffset-static_cast<int>(dy*3),0,static_cast<int>(fModel.ScrollbackSize()));Invalidate();

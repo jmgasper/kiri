@@ -47,17 +47,19 @@ class QMP:
             self.key(key)
             time.sleep(0.06)
 
-    def click(self, x, y, width, height):
+    def click(self, x, y, width, height, button='left'):
         self.command('input-send-event', events=[
             {'type': 'abs', 'data': {'axis': 'x', 'value': int(x * 32767 / width)}},
             {'type': 'abs', 'data': {'axis': 'y', 'value': int(y * 32767 / height)}}])
-        self.command('input-send-event', events=[{'type': 'btn', 'data': {'button': 'left', 'down': True}}])
+        # Let the guest consume tablet motion before dispatching the click.
+        time.sleep(0.1)
+        self.command('input-send-event', events=[{'type': 'btn', 'data': {'button': button, 'down': True}}])
         time.sleep(0.08)
-        self.command('input-send-event', events=[{'type': 'btn', 'data': {'button': 'left', 'down': False}}])
+        self.command('input-send-event', events=[{'type': 'btn', 'data': {'button': button, 'down': False}}])
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
-    p.add_argument('action', choices=['status', 'screenshot', 'key', 'type', 'click'])
+    p.add_argument('action', choices=['status', 'screenshot', 'key', 'type', 'click', 'right-click'])
     p.add_argument('args', nargs='*')
     a = p.parse_args()
     q = QMP()
@@ -71,5 +73,5 @@ if __name__ == '__main__':
         q.key(a.args[0])
     elif a.action == 'type':
         q.type(a.args[0])
-    elif a.action == 'click':
-        q.click(*map(int, a.args))
+    elif a.action in ['click', 'right-click']:
+        q.click(*map(int, a.args), button='right' if a.action == 'right-click' else 'left')

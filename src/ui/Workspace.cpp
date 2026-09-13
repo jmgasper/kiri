@@ -5,7 +5,8 @@
 #include "ui/Messages.h"
 #include "ui/PreviewView.h"
 #include "ui/TabStrip.h"
-#include "ui/TerminalView.h"
+#include "ui/TerminalPanel.h"
+#include "ui/RefreshButton.h"
 #include <Alert.h>
 #include <Application.h>
 #include <Button.h>
@@ -142,8 +143,9 @@ private:
 };
 }
 
-Workspace::Workspace():BWindow(BRect(40,70,1235,755),"Kiri",B_TITLED_WINDOW,B_ASYNCHRONOUS_CONTROLS|B_AUTO_UPDATE_SIZE_LIMITS) {
-    BPath settings;find_directory(B_USER_SETTINGS_DIRECTORY,&settings);settings.Append("Kiri");create_directory(settings.Path(),0755);fSettings=settings.Path();
+Workspace::Workspace(const std::string& settingsDirectory):BWindow(BRect(40,70,1235,755),"Kiri",B_TITLED_WINDOW,B_ASYNCHRONOUS_CONTROLS|B_AUTO_UPDATE_SIZE_LIMITS) {
+    BPath settings;find_directory(B_USER_SETTINGS_DIRECTORY,&settings);settings.Append("Kiri");
+    fSettings=settingsDirectory.empty()?settings.Path():settingsDirectory;create_directory(fSettings.c_str(),0755);
     fJobs=std::make_unique<AsyncQueue>(BMessenger(this),2);
     fLoaderFactory=std::make_unique<Editor>();
     fRecoveryDirectory=fSettings+"/recovery";create_directory(fRecoveryDirectory.c_str(),0700);
@@ -158,9 +160,10 @@ Workspace::Workspace():BWindow(BRect(40,70,1235,755),"Kiri",B_TITLED_WINDOW,B_AS
     auto* toolbar=new BView("toolbar",0);
     BLayoutBuilder::Group<>(toolbar,B_HORIZONTAL,8).SetInsets(12,8,12,8).Add(fProjectTitle).AddGlue().Add(open).Add(quick).Add(files).Add(git).Add(terminal);
     fExplorer=new Explorer();fExplorer->requestDirectory=[this](std::string path){LoadDirectory(path);};
+    fRefresh=new RefreshButton(new BMessage(kRefresh));
     auto* sidebar=new BView("sidebar",0);
     BLayoutBuilder::Group<>(sidebar,B_VERTICAL,6).SetInsets(0,8,0,0)
-        .AddGroup(B_HORIZONTAL,6).SetInsets(12,0,12,0).Add(new BStringView("files title","FILES"),1).Add(new BButton("refresh","Refresh",new BMessage(kRefresh)),0).End()
+        .AddGroup(B_HORIZONTAL,6).SetInsets(12,0,12,0).Add(new BStringView("files title","FILES"),0).Add(fRefresh,0).AddGlue().End()
         .Add(new BScrollView("explorer scroll",fExplorer,0,false,true,B_NO_BORDER));
     fTabs=new TabStrip();
     auto* documentHost=new BView("document host",0);fDocumentsLayout=new BCardLayout();documentHost->SetLayout(fDocumentsLayout);
@@ -181,12 +184,8 @@ Workspace::Workspace():BWindow(BRect(40,70,1235,755),"Kiri",B_TITLED_WINDOW,B_AS
     BLayoutBuilder::Group<>(editorPanel,B_VERTICAL,0).Add(fTabs).Add(fFindBar).Add(documentHost);
     fFindBar->Hide();
     fGit=new GitView();auto* modes=new BView("workspace modes",0);fModeLayout=new BCardLayout();modes->SetLayout(fModeLayout);fModeLayout->AddView(editorPanel);fModeLayout->AddView(fGit);
-    fTerminal=new TerminalView();auto* terminalPanel=new BView("terminal panel",0);
-    BLayoutBuilder::Group<>(terminalPanel,B_VERTICAL,0)
-        .AddGroup(B_HORIZONTAL,8).SetInsets(12,4,10,3).Add(new BStringView("terminal title","TERMINAL")).AddGlue()
-            .Add(new BButton("restart terminal","Restart",new BMessage(kTerminalRestart))).Add(new BButton("hide terminal","×",new BMessage(kToggleTerminal))).End()
-        .Add(fTerminal);
-    fTerminalSplit=new BSplitView(B_VERTICAL,1);fTerminalSplit->AddChild(modes);fTerminalSplit->AddChild(terminalPanel);
+    fTerminal=new TerminalPanel();
+    fTerminalSplit=new BSplitView(B_VERTICAL,1);fTerminalSplit->AddChild(modes);fTerminalSplit->AddChild(fTerminal);
     fTerminalSplit->SetItemWeight(fTerminalSplit->GetLayout()->ItemAt(0),.74f);fTerminalSplit->SetItemWeight(fTerminalSplit->GetLayout()->ItemAt(1),.26f);
     fSidebarSplit=new BSplitView(B_HORIZONTAL,1);fSidebarSplit->AddChild(sidebar);fSidebarSplit->AddChild(fTerminalSplit);
     fSidebarSplit->SetItemWeight(fSidebarSplit->GetLayout()->ItemAt(0),.20f);fSidebarSplit->SetItemWeight(fSidebarSplit->GetLayout()->ItemAt(1),.80f);
@@ -198,13 +197,17 @@ Workspace::Workspace():BWindow(BRect(40,70,1235,755),"Kiri",B_TITLED_WINDOW,B_AS
     ResizeTo(1195,685);
     RestoreSettings();ApplyTheme(fThemeIndex);
     BMessage pulse(kPulse);fPulse=std::make_unique<BMessageRunner>(BMessenger(this),&pulse,2000000);
-    fTerminal->Start(fProject.empty()?"/boot/home":fProject);
+    if(fTerminal->Empty()) NewTerminal(false);
 }
 Workspace::~Workspace() { fPulse.reset();fRecoveryTimer.reset();fRecoveryJobs.reset();fJobs.reset(); }
 
 BMenuBar* Workspace::BuildMenus() {
     auto* bar=new BMenuBar("menu");
-    auto add=[](BMenu* menu,const char* title,uint32 what,char key=0,uint32 modifiers=0) { menu->AddItem(new BMenuItem(title,new BMessage(what),key,modifiers)); };
+    auto add=[](BMenu* menu,const char* title,uint32 what,char key=0,uint32 modifiers=0) {
+        auto* message=new BMessage(what);
+        if(what==kCloseTab || what==kCloseTerminal || what==kToggleTerminal) message->AddBool("current_tab",true);
+        menu->AddItem(new BMenuItem(title,message,key,modifiers));
+    };
     auto* file=new BMenu("File");add(file,"New File",kNewFile,'N');add(file,"Open File…",kOpenFile,'O');add(file,"Open Folder…",kOpenProject,'O',B_SHIFT_KEY);file->AddSeparatorItem();
     add(file,"Save",kSave,'S');add(file,"Save As…",kSaveAs,'S',B_SHIFT_KEY);add(file,"Save All",kSaveAll);add(file,"Close Tab",kCloseTab,'W');file->AddSeparatorItem();add(file,"Quit",B_QUIT_REQUESTED,'Q');bar->AddItem(file);
     auto* edit=new BMenu("Edit");add(edit,"Undo",B_UNDO,'Z');add(edit,"Redo",B_REDO,'Z',B_SHIFT_KEY);edit->AddSeparatorItem();add(edit,"Cut",B_CUT,'X');add(edit,"Copy",B_COPY,'C');add(edit,"Paste",B_PASTE,'V');add(edit,"Select All",B_SELECT_ALL,'A');bar->AddItem(edit);
@@ -214,7 +217,7 @@ BMenuBar* Workspace::BuildMenus() {
     view->AddItem(themes);add(view,"Zoom In",kZoomIn,'+');add(view,"Zoom Out",kZoomOut,'-');add(view,"Word Wrap",kWrap);add(view,"Show Whitespace",kShowWhitespace);bar->AddItem(view);
     auto* search=new BMenu("Search");add(search,"Find / Replace",kFind,'F');add(search,"Find Next",kFindNext);add(search,"Find Previous",kFindPrevious);add(search,"Open Quickly…",kQuickOpen,'P');add(search,"Search Project…",kProjectSearch,'F',B_SHIFT_KEY);add(search,"Go to Line…",kGoToLine,'G');bar->AddItem(search);
     auto* git=new BMenu("Git");add(git,"Show Source Control",kToggleGit);add(git,"File History",kFileHistory);add(git,"Copy GitHub Permalink",kCopyPermalink,'L',B_SHIFT_KEY);git->AddSeparatorItem();add(git,"Refresh",kGitRefresh);add(git,"Fetch",kGitFetch);add(git,"Pull (Fast-forward Only)",kGitPull);add(git,"Push",kGitPush);bar->AddItem(git);
-    auto* term=new BMenu("Terminal");add(term,"Show / Hide",kToggleTerminal);add(term,"Restart Shell",kTerminalRestart);bar->AddItem(term);
+    auto* term=new BMenu("Terminal");add(term,"New Terminal",kNewTerminal,'T',B_SHIFT_KEY);add(term,"Close Terminal",kCloseTerminal);term->AddSeparatorItem();add(term,"Show / Hide",kToggleTerminal);bar->AddItem(term);
     return bar;
 }
 Workspace::Document* Workspace::Current() { return fSelected>=0 && fSelected<static_cast<int>(fDocuments.size())?fDocuments[fSelected].get():nullptr; }
@@ -222,7 +225,7 @@ Workspace::Document* Workspace::ByID(int64 id) { for(auto& document:fDocuments) 
 void Workspace::Notice(const std::string& text) { fStatus->SetText(text.c_str());fStatus->SetToolTip(text.c_str()); }
 void Workspace::UpdateTabs() {
     std::vector<TabLabel> labels;
-    for(auto& d:fDocuments) labels.push_back({d->name+(d->external?" !":""),d->path,d->editor && d->editor->Dirty()});
+    for(auto& d:fDocuments) labels.push_back({d->name+(d->external?" !":""),d->path,d->editor && d->editor->Dirty(),d->id});
     fTabs->SetTabs(std::move(labels),fSelected);UpdateStatus();
 }
 void Workspace::UpdateStatus() {
@@ -250,10 +253,26 @@ void Workspace::NewFile() {
     document->editor=new Editor();document->editor->SetText("");document->editor->ApplyTheme(Theme::Builtins()[fThemeIndex]);document->view=document->editor;
     fDocumentsLayout->AddView(document->view);fDocuments.push_back(std::move(document));SelectTab(fDocuments.size()-1);
 }
+void Workspace::NewTerminal(bool focus) {
+    if(focus) ++fFocusSerial;
+    fTerminalSplit->SetItemCollapsed(1,false);
+    fTerminal->NewTerminal(fProject.empty()?"/boot/home":fProject,focus);
+}
+void Workspace::FinishTerminalClose() {
+    if(!fTerminal->Empty()) return;
+    fTerminalSplit->SetItemCollapsed(1,true);
+    FocusWorkspace();
+}
+void Workspace::FocusWorkspace() {
+    if(fModeLayout->VisibleIndex()==1) fGit->FindView("changes")->MakeFocus();
+    else if(auto* document=Current();document && document->editor) document->editor->MakeFocus();
+    else if(auto* focus=CurrentFocus()) focus->MakeFocus(false);
+}
 
 void Workspace::OpenProject(const std::string& input) {
     auto path=CanonicalPath(input);std::error_code error;
     if(!fs::is_directory(path,error)) { Notice("Cannot open that folder.");return; }
+    bool changed=fProject!=path;
     fProject=path;++fGeneration;fIndex=std::make_shared<ProjectIndex>();fGitRoot.clear();fExplorer->Clear();fGit->SetRepository("");
     fProjectTitle->SetText(("KIRI  /  "+fs::path(path).filename().string()).c_str());SetTitle((fs::path(path).filename().string()+" — Kiri").c_str());
     Notice("Opening project…");auto generation=fGeneration;
@@ -266,7 +285,8 @@ void Workspace::OpenProject(const std::string& input) {
             fIndex=index;fGitRoot=root;fGit->SetRepository(root,result.ok()?"":result.diagnostic());UpdateStatus();SaveSettings();
         };
     },"project");
-    fTerminal->Start(path);
+    // A project change gets a fresh shell without interrupting existing tabs.
+    if(changed && !fTerminal->Empty()) NewTerminal(fTerminal->OwnsFocus());
 }
 void Workspace::LoadDirectory(const std::string& path) {
     auto generation=fGeneration;bool root=path==fProject;
@@ -363,7 +383,7 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
     auto* d=ByID(id);if(!d || !d->editor || d->saving) return;
     std::string path=CanonicalPath(input);FileStamp expected=d->path==path?d->stamp:StatFile(path);
     for(const auto& other:fDocuments) if(other->id!=id && other->path==path) {
-        d->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();
+        d->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();
         Notice("That file is already open in another tab. Close that tab or choose another name.");return;
     }
     // Save As replacement was confirmed by the native BFilePanel.
@@ -375,7 +395,7 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
             auto* document=ByID(id);if(!document) return;
             document->saving=false;
             if(!error.empty()) {
-                document->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();Notice(error);(new BAlert("Save File",error.c_str(),"OK"))->Go();return;
+                document->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();Notice(error);(new BAlert("Save File",error.c_str(),"OK"))->Go();return;
             }
             document->path=path;document->name=fs::path(path).filename().string();document->stamp=stamp;document->external=false;
             std::string_view saved(*text);if(document->bom) saved.remove_prefix(3);
@@ -389,10 +409,11 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
             RefreshIndex();
             if(fQuitWhenSaved) PostMessage(B_QUIT_REQUESTED);
             ContinueSaveAll();
+            ContinueCloseTabs();
         };
     },{},[this,id](const std::string& error) {
         if(auto* document=ByID(id)) { document->saving=false;document->closeAfterSave=false; }
-        fQuitWhenSaved=false;fSaveQueue.clear();Notice("Save failed: "+error);
+        fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();Notice("Save failed: "+error);
     });
 }
 void Workspace::ContinueSaveAll() {
@@ -409,14 +430,33 @@ bool Workspace::CloseTab(int index) {
     if(d->saving) { d->closeAfterSave=true;return false; }
     if(d->editor && d->editor->Dirty()) {
         int32 choice=(new BAlert("Unsaved Changes",("Save changes to "+d->name+"?").c_str(),"Cancel","Discard","Save",B_WIDTH_AS_USUAL,B_WARNING_ALERT))->Go();
-        if(choice==0) return false;
+        if(choice==0) { fCloseQueue.clear();return false; }
         if(choice==2) { d->closeAfterSave=true;Save(d);return false; }
     }
     ClearRecovery(*d);
     BView* view=d->view;fDocumentsLayout->RemoveView(view);view->RemoveSelf();delete view;fDocuments.erase(fDocuments.begin()+index);
     if(fDocuments.empty()) { fSelected=-1;fDocumentsLayout->SetVisibleItem(int32(0));UpdateTabs(); }
-    else SelectTab(std::min(index,static_cast<int>(fDocuments.size())-1));
+    else SelectTab(std::clamp(fSelected-(index<fSelected?1:0),0,static_cast<int>(fDocuments.size())-1));
     SaveSettings();return true;
+}
+void Workspace::CloseTabs(int keep) {
+    if(keep<-1 || keep>=static_cast<int>(fDocuments.size())) return;
+    if(fSavePanel && fSavePanel->IsShowing()) { fSavePanel->Window()->Activate();return; }
+    for(auto id:fCloseQueue) if(auto* document=ByID(id)) document->closeAfterSave=false;
+    fCloseQueue.clear();
+    if(keep>=0) { fDocuments[keep]->closeAfterSave=false;SelectTab(keep); }
+    for(size_t i=0;i<fDocuments.size();++i) if(static_cast<int>(i)!=keep) fCloseQueue.push_back(fDocuments[i]->id);
+    ContinueCloseTabs();
+}
+void Workspace::ContinueCloseTabs() {
+    // Store document identities so asynchronous saves and newly opened tabs
+    // cannot shift the set being closed. A save or cancellation stops this pass.
+    while(!fCloseQueue.empty()) {
+        int64 id=fCloseQueue.front();int index=-1;
+        for(size_t i=0;i<fDocuments.size();++i) if(fDocuments[i]->id==id) { index=i;break; }
+        if(index>=0 && !CloseTab(index)) return;
+        fCloseQueue.pop_front();
+    }
 }
 bool Workspace::QuitRequested() {
     if(!fQuitWhenSaved) fQuitDiscarded.clear();
@@ -439,7 +479,10 @@ bool Workspace::QuitRequested() {
 void Workspace::ApplyTheme(int index) {
     fThemeIndex=std::clamp(index,0,static_cast<int>(Theme::Builtins().size())-1);const auto& theme=Theme::Builtins()[fThemeIndex];
     for(int32 i=0;i<CountChildren();++i) ThemeView(ChildAt(i),theme);
-    fExplorer->ApplyTheme(theme);fTabs->ApplyTheme(theme);fTerminal->ApplyTheme(theme);fGit->ApplyTheme(theme);
+    auto* filesTitle=static_cast<BStringView*>(FindView("files title"));
+    BSize titleSize(filesTitle->StringWidth(filesTitle->Text())+2,B_SIZE_UNSET);
+    filesTitle->SetExplicitMinSize(titleSize);filesTitle->SetExplicitMaxSize(titleSize);
+    fExplorer->ApplyTheme(theme);fRefresh->ApplyTheme(theme);fTabs->ApplyTheme(theme);fTerminal->ApplyTheme(theme);fGit->ApplyTheme(theme);
     for(auto& d:fDocuments) {
         if(d->editor) d->editor->ApplyTheme(theme);
         if(auto* preview=dynamic_cast<PreviewView*>(d->view)) preview->ApplyTheme(theme);
@@ -604,7 +647,19 @@ void Workspace::Pulse() {
     });
 }
 void Workspace::MessageReceived(BMessage* message) {
+    // BMenuItem appends its menu position as "index". These menu commands
+    // operate on the current tab; that position is not a document/session index.
+    bool currentTab=false;
+    if(message->FindBool("current_tab",&currentTab)==B_OK && currentTab) message->RemoveName("index");
     auto* d=Current();auto* editor=d?d->editor:nullptr;
+    auto tabIndex=[&] {
+        int64 id;
+        if(message->FindInt64("tab_id",&id)==B_OK) {
+            for(size_t i=0;i<fDocuments.size();++i) if(fDocuments[i]->id==id) return static_cast<int>(i);
+            return -1;
+        }
+        int32 index=fSelected;message->FindInt32("index",&index);return static_cast<int>(index);
+    };
     switch(message->what) {
         case kWorkDone:fJobs->Drain();if(fRecoveryJobs) fRecoveryJobs->Drain();break;
         case kRecoveryTick:RecoveryTick();break;
@@ -652,10 +707,17 @@ void Workspace::MessageReceived(BMessage* message) {
         case B_CANCEL: {
             // BFilePanel also sends B_CANCEL when it hides after an accepted save.
             int64 token=0;if(message->FindInt64("panel_token",&token)!=B_OK || token!=fSavePanelToken || fSavePanelAccepted) break;
-            fQuitWhenSaved=false;fQuitDiscarded.clear();fSaveQueue.clear();if(auto* document=ByID(fSavePanelID)) document->closeAfterSave=false;break;
+            fQuitWhenSaved=false;fQuitDiscarded.clear();fSaveQueue.clear();fCloseQueue.clear();if(auto* document=ByID(fSavePanelID)) document->closeAfterSave=false;break;
         }
-        case kCloseTab: { int32 index=fSelected;message->FindInt32("index",&index);CloseTab(index);break; }
-        case kSelectTab: { int32 index;if(message->FindInt32("index",&index)==B_OK) SelectTab(index);break; }
+        case kCloseTab: {
+            if(!message->HasInt64("tab_id") && !message->HasInt32("index") && fTerminal->OwnsFocus()) {
+                fTerminal->CloseTerminal(fTerminal->IndexForMessage(*message));FinishTerminalClose();
+            } else CloseTab(tabIndex());
+            break;
+        }
+        case kSelectTab:SelectTab(tabIndex());break;
+        case kCloseAllTabs:CloseTabs();break;
+        case kCloseOtherTabs:if(auto index=tabIndex();index>=0) CloseTabs(index);break;
         case kEditorChanged:case kEditorPosition: {
             void* source=nullptr;message->FindPointer("editor",&source);
             if(message->what==kEditorChanged) {
@@ -674,10 +736,25 @@ void Workspace::MessageReceived(BMessage* message) {
             break;
         }
         case kTheme: { int32 index;if(message->FindInt32("index",&index)==B_OK) ApplyTheme(index);break; }
-        case kToggleTerminal:fTerminalSplit->SetItemCollapsed(1,!fTerminalSplit->IsItemCollapsed(1));break;
+        case kToggleTerminal:
+            if(fTerminal->Empty()) NewTerminal();
+            else {
+                bool show=fTerminalSplit->IsItemCollapsed(1);fTerminalSplit->SetItemCollapsed(1,!show);
+                if(show) { ++fFocusSerial;fTerminal->SelectTerminal(fTerminal->IndexForMessage(*message)); }
+                else FocusWorkspace();
+            }
+            break;
         case kToggleSidebar:fSidebarSplit->SetItemCollapsed(0,!fSidebarSplit->IsItemCollapsed(0));break;
         case kToggleGit:++fFocusSerial;fModeLayout->SetVisibleItem(fModeLayout->VisibleIndex()==0?1:0);break;
-        case kTerminalRestart:fTerminal->Start(fProject.empty()?"/boot/home":fProject);break;
+        case kNewTerminal:NewTerminal();break;
+        case kSelectTerminal:++fFocusSerial;fTerminal->SelectTerminal(fTerminal->IndexForMessage(*message));break;
+        case kCloseTerminal:fTerminal->CloseTerminal(fTerminal->IndexForMessage(*message));FinishTerminalClose();break;
+        case kCloseAllTerminals:fTerminal->CloseTerminals();FinishTerminalClose();break;
+        case kCloseOtherTerminals:
+            if(auto index=fTerminal->IndexForMessage(*message);index>=0) fTerminal->CloseTerminals(index);
+            break;
+        case kTerminalState:fTerminal->UpdateTabs();break;
+        case kTerminalFocus:++fFocusSerial;break;
         case kRefresh:if(!fProject.empty()) { LoadDirectory(fProject);fGit->Refresh();RefreshIndex(); }break;
         case kFind:ShowFind();break;
         case kFindNext:case kFindPrevious:

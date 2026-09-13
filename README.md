@@ -4,7 +4,7 @@ A native C++ project editor for Haiku, with a file tree, source editing, an
 embedded terminal and a Git workspace. Kiri uses Haiku's Interface Kit,
 Scintilla, Lexilla and libvterm. There is no browser or web UI runtime.
 
-**0.1.0 beta 1** builds and runs on Haiku R1/beta5 x86_64. The application has
+**0.1.0 beta 2** builds and runs on Haiku R1/beta5 x86_64. The application has
 been exercised in QEMU/KVM, including real editing, staging and committing,
 crash recovery, image previews and a 200 MiB document. See the
 [verification record](docs/STATUS.md) and [performance measurements](docs/PERFORMANCE.md).
@@ -16,7 +16,7 @@ crash recovery, image previews and a 200 MiB document. See the
 Install the package from `artifacts/` on Haiku:
 
 ```sh
-pkgman install ./artifacts/kiri-0.1.0~beta1-1-x86_64.hpkg
+pkgman install ./artifacts/kiri-0.1.0~beta2-2-x86_64.hpkg
 /boot/system/apps/Kiri /path/to/project
 ```
 
@@ -44,9 +44,12 @@ the native release artifact is built with the Makefile.
 
 - **Open Folder** sets the lazy file tree, project index, Git repository and
   terminal directory. Expand folders and double-click files to open them.
-  **Refresh** picks up files created outside Kiri.
+  The refresh icon beside **FILES** picks up files created outside Kiri.
 - Tabs show unsaved dots and close controls. Scroll the tab strip to reveal
-  additional documents. Editing includes undo/redo, multiple selections, folding,
+  additional documents. Right-click any document or terminal tab for **Close all**
+  and **Close others**; the latter keeps the tab you clicked. Unsaved documents
+  keep their save prompts, and Cancel stops the remaining closes.
+  Editing includes undo/redo, multiple selections, folding,
   indentation, line numbers, wrapping, zoom, find/replace and go to line.
 - **Open Quickly** searches file paths. **Search Project** finds literal text
   and opens a result at its line and column. Newer queries cancel older work.
@@ -58,13 +61,19 @@ the native release artifact is built with the Makefile.
 - Images use installed Haiku translators, a transparency checkerboard and
   fit/actual-size modes. Double-click to switch size; drag to pan at actual size.
   Other binary formats open as read-only, bounded hex previews.
-- The terminal runs an interactive shell in a real PTY with UTF-8, ANSI colors,
-  scrollback and alternate-screen programs. Drag across rows to select output;
-  Copy and Paste use the system clipboard. Restart is available after shell exit.
+- The terminal panel uses the same tabs as the editor. **+** or
+  **Terminal → New Terminal** opens another independent shell in the current
+  project directory. Tabs retain their directory, variables and scrollback while
+  other sessions run. Changing projects starts a new tab and preserves existing
+  shells. Close a session with its tab’s close control; closing the last session
+  hides the panel, and the toolbar’s **Terminal** control opens it again.
+- Each terminal is a real PTY with UTF-8, ANSI colors, scrollback and alternate-screen
+  programs. Drag across rows to select output; Copy and Paste use the system clipboard.
 
 Haiku's default Command modifier is **Alt**. Menus show configured shortcuts:
 Alt+P opens files quickly, Alt+F opens find/replace, Alt+Shift+F searches the project,
-Alt+G goes to a line, Alt+S saves, and Alt+W closes a tab. In the find bar,
+Alt+G goes to a line, Alt+S saves, Alt+Shift+T opens a terminal, and Alt+W closes
+the focused terminal or document tab. In the find bar,
 Enter in the replacement field replaces one match; **All** replaces every match
 as one undo action. Terminal control sequences use **Ctrl**, including Ctrl+C
 and Ctrl+D.
@@ -129,7 +138,7 @@ cmake --build build-host -j8
 ctest --test-dir build-host --output-on-failure
 ```
 
-The current suites pass **155 core checks** and **34 Haiku editor/file/worker checks**.
+The current suites pass **163 core checks** and **34 Haiku editor/file/worker checks**.
 Native visual and interaction checks are recorded separately in
 [STATUS.md](docs/STATUS.md). The isolated VM and build workflow is documented in
 [VM.md](docs/VM.md); machine state and SSH keys are ignored by Git.

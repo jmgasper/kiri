@@ -5,6 +5,7 @@ enum : uint32 {
     kOpenProject='oppr', kProjectChosen='prch', kOpenFile='opfl', kFileChosen='flch',
     kNewFile='newf', kSave='save', kSaveAs='svas', kSaveChosen='svch', kSaveAll='sval',
     kCloseTab='cltb', kSelectTab='sltb', kEditorChanged='edch', kEditorPosition='edps',
+    kCloseAllTabs='clat', kCloseOtherTabs='clot',
     kTheme='them', kToggleTerminal='tote', kToggleSidebar='tosi', kToggleGit='togi',
     kRefresh='refr', kFind='find', kFindNext='fnxt', kFindPrevious='fprv', kReplace='repl',
     kReplaceAll='rpal', kGoToLine='gtln', kGoToResult='gtrs', kQuickOpen='qkop',
@@ -15,7 +16,9 @@ enum : uint32 {
     kGitStage='gsta', kGitUnstage='guns', kGitCommit='gcmt', kGitMore='gmor',
     kGitStagedDiff='gsdf', kGitWorktreeDiff='gwdf', kGitFetch='gftc',
     kGitPull='gpul', kGitPush='gpsh', kGitCommandDone='gcmd',
-    kTreeExpand='trex', kTerminalTick='tetk', kTerminalRestart='ters',
+    kTreeExpand='trex', kTerminalTick='tetk', kTerminalState='test', kTerminalFocus='tefo',
+    kNewTerminal='tent', kSelectTerminal='tesl', kCloseTerminal='tect',
+    kCloseAllTerminals='teca', kCloseOtherTerminals='teco',
     kPreviewZoom='przm', kPromptAccept='prac', kPromptCancel='prca', kRecoveryTick='rctk'
 };
 }

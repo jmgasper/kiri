@@ -29,10 +29,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
     find_path(LEXILLA_INCLUDE_DIR SciLexer.h PATH_SUFFIXES lexilla REQUIRED)
     find_library(SCINTILLA_LIBRARY scintilla REQUIRED)
     find_library(LEXILLA_LIBRARY lexilla REQUIRED)
-    add_executable(Kiri
-        src/main.cpp src/ui/Workspace.cpp src/ui/Editor.cpp
+    set(KIRI_UI_SOURCES src/ui/Workspace.cpp src/ui/Editor.cpp
         src/ui/Theme.cpp src/ui/Explorer.cpp src/ui/TerminalView.cpp
-        src/ui/PreviewView.cpp src/ui/GitView.cpp src/ui/TabStrip.cpp)
+        src/ui/PreviewView.cpp src/ui/GitView.cpp src/ui/TabStrip.cpp
+        src/ui/TerminalPanel.cpp src/ui/RefreshButton.cpp)
+    add_executable(Kiri src/main.cpp ${KIRI_UI_SOURCES})
     target_include_directories(Kiri PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
     target_compile_options(Kiri PRIVATE -Wall -Wextra -Wno-multichar)
     target_link_libraries(Kiri PRIVATE kiri_core ${SCINTILLA_LIBRARY} ${LEXILLA_LIBRARY}
@@ -42,6 +43,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
         target_include_directories(kiri_native_tests PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
         target_link_libraries(kiri_native_tests PRIVATE kiri_core ${SCINTILLA_LIBRARY} ${LEXILLA_LIBRARY} be)
         add_test(NAME kiri_native COMMAND kiri_native_tests)
+        add_executable(kiri_workspace_smoke EXCLUDE_FROM_ALL tests/WorkspaceSmoke.cpp ${KIRI_UI_SOURCES})
+        target_include_directories(kiri_workspace_smoke PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
+        target_compile_options(kiri_workspace_smoke PRIVATE -Wno-multichar)
+        target_link_libraries(kiri_workspace_smoke PRIVATE kiri_core ${SCINTILLA_LIBRARY} ${LEXILLA_LIBRARY} be tracker translation)
     endif()
     find_program(RC_EXECUTABLE rc REQUIRED)
     find_program(XRES_EXECUTABLE xres REQUIRED)

@@ -17,6 +17,22 @@ python3 tools/vm.py screenshot
 VNC: `127.0.0.1:5904`. SSH: `127.0.0.1:2224`. QMP: `.vm/qmp.sock`.
 The SSH key is dedicated to this VM and is not checked in.
 
+To check UI changes while preserving an open Kiri session, build the separate
+workspace harness and give it a dedicated settings directory and test project:
+
+```sh
+bash tools/haiku.sh 'cd /boot/home/kiri && make workspace-smoke'
+bash tools/haiku.sh 'nohup /boot/home/kiri/build-haiku/kiri_workspace_smoke /boot/home/kiri/ui-test-settings /boot/home/KiriTabsTest >/boot/home/kiri/ui-test.log 2>&1 </dev/null &'
+bash tools/haiku.sh 'hey application/x-vnd.Kiri-workspace-tests count View of View "terminal host" of Window 0'
+bash tools/haiku.sh 'hey application/x-vnd.Kiri-workspace-tests quit'
+```
+
+The harness uses the production workspace code with a different application
+signature. Create the disposable project before launching it. Each card host's
+child count includes one empty placeholder in addition to the open tabs.
+`tools/vm.py right-click X Y WIDTH HEIGHT` opens native context menus; use
+`screenshot -s -w OUTPUT.png` inside Haiku to capture only the active window.
+
 Stop gracefully with `bash tools/haiku.sh shutdown`. Check the live QMP handle
 before attempting to start another instance; do not infer termination from an SSH timeout.
 

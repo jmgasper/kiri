@@ -8,4 +8,5 @@ bash tools/haiku.sh 'cd /boot/home/kiri && make -j4 && make check'
 mkdir -p artifacts
 scp -O -i .vm/id_ed25519 -P 2224 -o IdentitiesOnly=yes -o BatchMode=yes \
     -o UserKnownHostsFile=.vm/known_hosts \
-    user@127.0.0.1:/boot/home/kiri/build-haiku/Kiri artifacts/Kiri
+    user@127.0.0.1:/boot/home/kiri/build-haiku/Kiri artifacts/Kiri.new
+mv -f artifacts/Kiri.new artifacts/Kiri

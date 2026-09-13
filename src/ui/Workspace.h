@@ -14,10 +14,10 @@ class BFilePanel;class BCardLayout;class BSplitView;class BStringView;
 class BTextControl;class BCheckBox;class BMessageRunner;
 class BMenuBar;
 namespace kiri {
-class Editor;class Explorer;class GitView;class TerminalView;class TabStrip;
+class Editor;class Explorer;class GitView;class TerminalPanel;class TabStrip;class RefreshButton;
 class Workspace:public BWindow {
 public:
-    Workspace();
+    explicit Workspace(const std::string& settingsDirectory={});
     ~Workspace() override;
     void MessageReceived(BMessage* message) override;
     bool QuitRequested() override;
@@ -42,6 +42,11 @@ private:
     void UpdateStatus();
     void SelectTab(int index);
     bool CloseTab(int index);
+    void CloseTabs(int keep=-1);
+    void ContinueCloseTabs();
+    void NewTerminal(bool focus=true);
+    void FinishTerminalClose();
+    void FocusWorkspace();
     void NewFile();
     void Save(Document* document,bool saveAs=false);
     void SaveTo(int64 id,const std::string& path);
@@ -82,6 +87,7 @@ private:
     bool fQuitWhenSaved=false,fDiskCheckPending=false;
     std::map<int64,int64> fQuitDiscarded;
     std::deque<int64> fSaveQueue;
+    std::deque<int64> fCloseQueue;
     std::string fRecoveryDirectory,fSessionToken,fRestoreSelected;
     std::set<std::string> fRetiredDrafts;
     std::map<std::string,BMessage> fRestoreDocuments;
@@ -90,7 +96,8 @@ private:
     bool fRestoring=false,fRestoreFilesStarted=false;
     Explorer* fExplorer;
     GitView* fGit;
-    TerminalView* fTerminal;
+    TerminalPanel* fTerminal;
+    RefreshButton* fRefresh;
     TabStrip* fTabs;
     BCardLayout* fDocumentsLayout;
     BCardLayout* fModeLayout;
