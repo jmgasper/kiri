@@ -18,7 +18,7 @@ namespace kiri {
 class Editor;class Explorer;class GitView;class TerminalPanel;class TabStrip;class RefreshButton;
 class Workspace:public BWindow {
 public:
-    explicit Workspace(const std::string& settingsDirectory={});
+    explicit Workspace(const std::string& settingsDirectory={},bool restoreSession=true);
     ~Workspace() override;
     void MessageReceived(BMessage* message) override;
     bool QuitRequested() override;
@@ -60,7 +60,8 @@ private:
     void CopyPermalink();
     void LoadDirectory(const std::string& path);
     void RefreshIndex();
-    void RestoreSettings();
+    void RestoreSettings(bool restoreSession);
+    void RememberRecent(const std::string& path,bool folder);
     void SaveSettings();
     void FinishRestore();
     void RestoreDraft(const std::string& file);

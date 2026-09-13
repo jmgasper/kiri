@@ -4,7 +4,7 @@ A native C++ project editor for Haiku, with a file tree, source editing, an
 embedded terminal and a Git workspace. Kiri uses Haiku's Interface Kit,
 Scintilla, Lexilla and libvterm. There is no browser or web UI runtime.
 
-**0.1.0 beta 4** builds and runs on Haiku R1/beta5 x86_64. The application has
+**0.1.0 beta 5** builds and runs on Haiku R1/beta5 x86_64. The application has
 been exercised in QEMU/KVM, including real editing, staging and committing,
 crash recovery, image previews and a 200 MiB document. See the
 [verification record](docs/STATUS.md) and [performance measurements](docs/PERFORMANCE.md).
@@ -16,8 +16,8 @@ crash recovery, image previews and a 200 MiB document. See the
 Install the package from `artifacts/` on Haiku:
 
 ```sh
-pkgman install ./artifacts/kiri-0.1.0~beta4-1-x86_64.hpkg
-/boot/system/apps/Kiri /path/to/project
+pkgman install ./artifacts/kiri-0.1.0~beta5-1-x86_64.hpkg
+/boot/system/apps/Kiri
 ```
 
 Kiri also appears in Deskbar's Applications menu. The package declares its
@@ -39,6 +39,22 @@ Scintilla 5.3.4 and Lexilla 5.4.6. Some current HaikuPorts compiler packages
 require a newer Haiku release; beta5's Installer provides compatible development
 tools. Use packages matching your OS. A CMake 3.18+ build is also provided;
 the native release artifact is built with the Makefile.
+
+## Launcher
+
+Starting Kiri shows a compact launcher with **Open Folder…**, **Open File…**,
+**New File** and the 24 most recent folders and files. Recent items show their
+native icon, name and location; double-click one, or select it and press Enter.
+The list persists across restarts and initially includes the previous session.
+Unavailable items can be removed from the list without deleting files.
+
+Choosing the previous project restores its saved tabs and editor positions.
+Opening a file or folder from Tracker or the command line goes straight to the
+workspace. Unsaved documents from an interrupted session recover immediately.
+**File → Show Launcher…** brings the launcher back while you work; opening
+another item there preserves your existing tabs. The launcher follows your theme.
+
+![Kiri's launcher](docs/screenshots/launcher.png)
 
 ## Workspace
 

@@ -2,6 +2,7 @@
 #include <SupportDefs.h>
 namespace kiri {
 enum : uint32 {
+    kShowLauncher='lnsh',kHideLauncher='lnhd',kLauncherClosed='lncl',kRecentsChanged='rccg',kActivateWorkspace='actw',
     kOpenProject='oppr', kProjectChosen='prch', kOpenFile='opfl', kFileChosen='flch',
     kNewFile='newf', kSave='save', kSaveAs='svas', kSaveChosen='svch', kSaveAll='sval',
     kCloseTab='cltb', kSelectTab='sltb', kEditorChanged='edch', kEditorPosition='edps',

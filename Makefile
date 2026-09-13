@@ -14,7 +14,7 @@ CORE_OBJ = $(CORE:%.cpp=$(BUILD)/%.o)
 UI_OBJ = $(UI:%.cpp=$(BUILD)/%.o)
 VTERM_OBJ = $(VTERM:%.c=$(BUILD)/%.o)
 LIBS = -lbe -ltracker -ltranslation -lscintilla -llexilla
-.PHONY: all check check-native workspace-smoke package clean
+.PHONY: all check check-native workspace-smoke launcher-smoke package clean
 all: $(BUILD)/Kiri
 $(BUILD)/Kiri: $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) resources/Kiri.rdef
 	$(CXX) -o $@.new $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) $(LIBS)
@@ -31,7 +31,7 @@ $(BUILD)/kiri_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/tests/CoreTests.o
 	$(CXX) -o $@ $^ -lbe
 check: $(BUILD)/kiri_tests
 	$(BUILD)/kiri_tests
-$(BUILD)/kiri_native_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/src/ui/Editor.o $(BUILD)/src/ui/Theme.o $(BUILD)/src/ui/EditorSettings.o $(BUILD)/src/ui/FileIcons.o $(BUILD)/tests/NativeTests.o
+$(BUILD)/kiri_native_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/src/ui/Editor.o $(BUILD)/src/ui/Theme.o $(BUILD)/src/ui/EditorSettings.o $(BUILD)/src/ui/FileIcons.o $(BUILD)/src/ui/RecentItems.o $(BUILD)/tests/NativeTests.o
 	$(CXX) -o $@ $^ $(LIBS)
 check-native: $(BUILD)/kiri_native_tests
 	$(BUILD)/kiri_native_tests
@@ -39,8 +39,12 @@ $(BUILD)/kiri_workspace_smoke: $(CORE_OBJ) $(VTERM_OBJ) $(filter-out $(BUILD)/sr
 	$(CXX) -o $@.new $^ $(LIBS)
 	mv $@.new $@
 workspace-smoke: $(BUILD)/kiri_workspace_smoke
+$(BUILD)/kiri_launcher_smoke: $(CORE_OBJ) $(VTERM_OBJ) $(filter-out $(BUILD)/src/main.o,$(UI_OBJ)) $(BUILD)/tests/LauncherSmoke.o
+	$(CXX) -o $@.new $^ $(LIBS)
+	mv $@.new $@
+launcher-smoke: $(BUILD)/kiri_launcher_smoke
 package: all
 	bash tools/package-haiku.sh
 clean:
 	rm -rf $(BUILD)
--include $(CORE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(VTERM_OBJ:.o=.d) $(BUILD)/tests/CoreTests.d $(BUILD)/tests/NativeTests.d $(BUILD)/tests/WorkspaceSmoke.d
+-include $(CORE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(VTERM_OBJ:.o=.d) $(BUILD)/tests/CoreTests.d $(BUILD)/tests/NativeTests.d $(BUILD)/tests/WorkspaceSmoke.d $(BUILD)/tests/LauncherSmoke.d

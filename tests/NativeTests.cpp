@@ -1,11 +1,13 @@
 #include "ui/Editor.h"
 #include "ui/Async.h"
 #include "ui/FileIcons.h"
+#include "ui/RecentItems.h"
 #include "core/FileIO.h"
 #include "core/Project.h"
 #include <Application.h>
 #include <Bitmap.h>
 #include <Font.h>
+#include <File.h>
 #include <LayoutBuilder.h>
 #include <Window.h>
 #include <OS.h>
@@ -26,6 +28,38 @@ namespace fs=std::filesystem;
 static int checks=0;
 #define CHECK(x) do { ++checks;if(!(x)) throw std::runtime_error(std::string(__FILE__)+":"+std::to_string(__LINE__)+": " #x); } while(false)
 static uint64_t Resident() { ssize_t cookie=0;area_info area{};uint64_t total=0;while(get_next_area_info(getpid(),&cookie,&area)==B_OK) total+=area.ram_size;return total; }
+static void Recents() {
+    char temporary[]="/tmp/kiri-recents-XXXXXX";CHECK(mkdtemp(temporary));std::string root=CanonicalPath(temporary);
+    auto write=[](const std::string& path,const BMessage& message) {
+        BFile file(path.c_str(),B_WRITE_ONLY|B_CREATE_FILE|B_ERASE_FILE);CHECK(file.InitCheck()==B_OK);CHECK(message.Flatten(&file)==B_OK);
+    };
+    std::string folder=root+"/project",first=root+"/first.cpp",second=root+"/日本語 file.txt";
+    fs::create_directory(folder);{std::ofstream file(first);file<<"preserve this file\n";}
+    BMessage legacy;legacy.AddString("project",folder.c_str());legacy.AddString("file",first.c_str());legacy.AddString("file",second.c_str());legacy.AddString("selected",second.c_str());
+    write(root+"/settings",legacy);auto saved=ReadFile(root+"/settings").bytes;
+    RecentItems history(root);auto items=history.Load();
+    CHECK(items.size()==3);CHECK(items[0].folder && items[0].path==folder);CHECK(!items[1].folder && items[1].path==second);
+    CHECK(history.Remember(first,false));items=RecentItems(root).Load();
+    CHECK(items.size()==3 && items[0].path==first && items[1].path==folder);
+    CHECK(history.Remember(folder+"/../project",true));items=history.Load();
+    CHECK(items.size()==3 && items[0].path==folder && items[0].folder);
+    CHECK(!history.Remember("",false));CHECK(history.Load().size()==3);
+    CHECK(history.Remove(first));CHECK(ReadFile(first).bytes=="preserve this file\n");CHECK(history.Load().size()==2);
+    CHECK(ReadFile(root+"/settings").bytes==saved);
+    for(size_t i=0;i<RecentItems::Limit+5;++i) if(!history.Remember(root+"/file-"+std::to_string(i),false)) throw std::runtime_error("Cannot save recent items.");
+    items=RecentItems(root).Load();CHECK(items.size()==RecentItems::Limit);
+    CHECK(items.front().path==root+"/file-"+std::to_string(RecentItems::Limit+4));CHECK(items.back().path==root+"/file-5");
+    for(const auto& item:items) history.Remove(item.path);
+    CHECK(RecentItems(root).Load().empty()); // An empty list must not re-import the old session.
+    BMessage malformed,row;row.AddString("path","relative.cpp");row.AddBool("folder",false);malformed.AddMessage("item",&row);
+    row.MakeEmpty();row.AddString("path",first.c_str());malformed.AddMessage("item",&row);
+    row.AddBool("folder",false);malformed.AddMessage("item",&row);malformed.AddMessage("item",&row);
+    write(root+"/recent",malformed);items=history.Load();CHECK(items.size()==1 && items[0].path==first);
+    // Unsaved recovery snapshots are not recent source files.
+    std::string oldRoot=root+"/legacy";fs::create_directory(oldRoot);legacy.MakeEmpty();legacy.AddString("selected",(root+"/recovery/draft").c_str());
+    write(oldRoot+"/settings",legacy);CHECK(RecentItems(oldRoot).Load().empty());
+    fs::remove_all(root);
+}
 static double Luminance(rgb_color color) {
     auto channel=[](uint8 value) { double c=value/255.0;return c<=.04045?c/12.92:std::pow((c+.055)/1.055,2.4); };
     return .2126*channel(color.red)+.7152*channel(color.green)+.0722*channel(color.blue);
@@ -133,7 +167,7 @@ int main(int argc,char** argv) {
         editor->SetText("{\"key\": true, \"n\": 42}\n");editor->SetLanguage("test.json");editor->SendMessage(SCI_COLOURISE,0,-1);
         CHECK(editor->SendMessage(SCI_GETSTYLEAT,3)==SCE_JSON_PROPERTYNAME);CHECK(editor->SendMessage(SCI_GETSTYLEAT,8)==SCE_JSON_KEYWORD);
         editor->MarkRecovered();CHECK(editor->Dirty());editor->MarkSaved();CHECK(!editor->Dirty());
-        Preferences(editor);Icons();
+        Preferences(editor);Icons();Recents();
         auto loader=editor->CreateLoader(true);CHECK(loader->loader);
         std::thread loading([&]{CHECK(loader->loader->AddData("first\r\nsecond\r\n",15)==SC_STATUS_OK);});loading.join();editor->Adopt(*loader,0);
         CHECK(editor->Text()=="first\r\nsecond\r\n");CHECK(editor->SendMessage(SCI_GETLINECOUNT)==3);CHECK(!editor->Dirty());CHECK(editor->SendMessage(SCI_GETDOCUMENTOPTIONS)&SC_DOCUMENTOPTION_STYLES_NONE);

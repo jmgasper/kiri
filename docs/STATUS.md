@@ -1,13 +1,13 @@
-# Beta 4 verification record
+# Beta 5 verification record
 
-Verified September 13, 2026 on Haiku R1/beta5 x86_64, hrev57937+113, in
+Verified September 14, 2026 on Haiku R1/beta5 x86_64, hrev57937+113, in
 QEMU/KVM with 4 vCPUs and 4 GiB RAM. Native build: GCC 13.3, Scintilla 5.3.4,
 Lexilla 5.4.6. Portable core also built and tested with Linux GCC 13.3.
 
 ## Automated checks
 
-The suites below passed for beta 3. Beta 4 removes workspace chrome only;
-it was rebuilt natively and received the focused interaction checks below.
+Beta 5 rebuilt the native application and reran the expanded native suite.
+The unchanged portable core retains its beta 3 test baseline.
 
 - **163 core checks pass on Linux and Haiku.** Coverage includes literal
   subprocess arguments, timeout/cancellation/output limits; UTF-8 boundaries,
@@ -17,17 +17,36 @@ it was rebuilt natively and received the focused interaction checks below.
   and graph lanes; GitHub immutable line/range mapping and boundaries; ignore-aware indexing
   and search; terminal escape handling and real PTY shells including Ctrl+D,
   independent directories and variables, and closing one shell while another runs.
-- **190 native editor, file and worker checks pass.** C++/JSON token styles,
+- **216 native editor, file and worker checks pass.** C++/JSON token styles,
   Unicode navigation, dirty state, undo, current-match and all-match replacement,
   ten themes (five dark and five light), text/syntax contrast, installed font
   selection and size, settings round trips and legacy defaults, invalid settings
   fallback, unchanged text/selection/dirty state during appearance changes,
   native MIME icons, streamed document adoption, text/binary Haiku attribute
-  preservation during saves and cancellation of superseded work.
+  preservation during saves and cancellation of superseded work. Recent-history
+  checks cover migration from the previous session, persistence, canonical-path
+  deduplication, Unicode paths, most-recent ordering, the 24-item limit, malformed
+  records, removal without deleting source files, and excluding unsaved drafts.
 - The native performance fixture adds checks for the 200 MiB document's byte
   and line counts and a 100,001-file index. See [measurements](PERFORMANCE.md).
 
 ## Observed native interaction
+
+Beta 5's isolated application instance used the production startup flow. A
+normal launch showed only the launcher. Native folder and file pickers opened
+the selected items, and **File → Show Launcher** returned to the recent list.
+Selecting a recent file activated it; choosing the previous project after a
+restart restored its three saved tabs and selected document. A missing recent
+file displayed Cancel and Remove from Recent, and removal retained the other
+four entries. Starting with New File created a single untitled document;
+passing a file on the command line opened only that file without a launcher.
+Passing a project folder also bypassed the launcher. Changing the workspace
+theme updated the visible launcher in both dark and light appearances.
+
+After the test instance was terminated with an unsaved draft, restarting
+recovered its exact text and dirty state directly in the workspace. Discarding
+that test draft removed its recovery file. The existing user session remained
+open throughout these checks.
 
 Beta 4 removes the project breadcrumb and the entire top button row. The
 file tree and editor sit directly below the menu bar, with the project folder
@@ -94,7 +113,8 @@ very-long-line performance, giant flat directories and low-memory operation
 remain separate measurement work. Native CMake builds are supplied but the
 tested release build uses the Makefile.
 
-Screenshots show [editor preferences](screenshots/preferences.png), the
+Screenshots show the [launcher](screenshots/launcher.png) in dark and
+[light](screenshots/launcher-light.png) themes, [editor preferences](screenshots/preferences.png), the
 [ten-theme menu](screenshots/preferences-themes.png), the [workspace](screenshots/workspace.png),
 [Git history and diff](screenshots/git.png), [image preview](screenshots/image.png)
 and [Daylight theme](screenshots/daylight.png) in the running Haiku application.

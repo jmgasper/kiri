@@ -9,6 +9,7 @@
 #include "ui/RefreshButton.h"
 #include "ui/PreferencesWindow.h"
 #include "ui/FileIcons.h"
+#include "ui/RecentItems.h"
 #include <Alert.h>
 #include <Application.h>
 #include <Button.h>
@@ -145,9 +146,10 @@ private:
 };
 }
 
-Workspace::Workspace(const std::string& settingsDirectory):BWindow(BRect(40,70,1235,755),"Kiri",B_TITLED_WINDOW,B_ASYNCHRONOUS_CONTROLS|B_AUTO_UPDATE_SIZE_LIMITS) {
+Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession):BWindow(BRect(40,70,1235,755),"Kiri",B_TITLED_WINDOW,B_ASYNCHRONOUS_CONTROLS|B_AUTO_UPDATE_SIZE_LIMITS) {
     BPath settings;find_directory(B_USER_SETTINGS_DIRECTORY,&settings);settings.Append("Kiri");
     fSettings=settingsDirectory.empty()?settings.Path():settingsDirectory;create_directory(fSettings.c_str(),0755);
+    RecentItems(fSettings).Load();
     fJobs=std::make_unique<AsyncQueue>(BMessenger(this),2);
     fLoaderFactory=std::make_unique<Editor>();
     fRecoveryDirectory=fSettings+"/recovery";create_directory(fRecoveryDirectory.c_str(),0700);
@@ -189,7 +191,7 @@ Workspace::Workspace(const std::string& settingsDirectory):BWindow(BRect(40,70,1
     BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(menu).Add(fSidebarSplit).Add(fStatus);
     for(int32 i=0;i<CountChildren();++i) ThemeView(ChildAt(i),Theme::Builtins()[0]);
     ResizeTo(1195,685);
-    RestoreSettings();ApplyTheme(fEditorSettings.theme);
+    RestoreSettings(restoreSession);ApplyTheme(fEditorSettings.theme);
     BMessage pulse(kPulse);fPulse=std::make_unique<BMessageRunner>(BMessenger(this),&pulse,2000000);
     if(fTerminal->Empty()) NewTerminal(false);
 }
@@ -200,9 +202,10 @@ BMenuBar* Workspace::BuildMenus() {
     auto add=[](BMenu* menu,const char* title,uint32 what,char key=0,uint32 modifiers=0) {
         auto* message=new BMessage(what);
         if(what==kCloseTab || what==kCloseTerminal || what==kToggleTerminal) message->AddBool("current_tab",true);
+        if(what==kOpenFile) message->AddBool("file_picker",true);
         menu->AddItem(new BMenuItem(title,message,key,modifiers));
     };
-    auto* file=new BMenu("File");add(file,"New File",kNewFile,'N');add(file,"Open File…",kOpenFile,'O');add(file,"Open Folder…",kOpenProject,'O',B_SHIFT_KEY);file->AddSeparatorItem();
+    auto* file=new BMenu("File");add(file,"New File",kNewFile,'N');add(file,"Open File…",kOpenFile,'O');add(file,"Open Folder…",kOpenProject,'O',B_SHIFT_KEY);add(file,"Show Launcher…",kShowLauncher);file->AddSeparatorItem();
     add(file,"Save",kSave,'S');add(file,"Save As…",kSaveAs,'S',B_SHIFT_KEY);add(file,"Save All",kSaveAll);add(file,"Close Tab",kCloseTab,'W');file->AddSeparatorItem();add(file,"Quit",B_QUIT_REQUESTED,'Q');bar->AddItem(file);
     auto* edit=new BMenu("Edit");add(edit,"Undo",B_UNDO,'Z');add(edit,"Redo",B_REDO,'Z',B_SHIFT_KEY);edit->AddSeparatorItem();add(edit,"Cut",B_CUT,'X');add(edit,"Copy",B_COPY,'C');add(edit,"Paste",B_PASTE,'V');add(edit,"Select All",B_SELECT_ALL,'A');edit->AddSeparatorItem();add(edit,"Preferences…",kShowPreferences,',');bar->AddItem(edit);
     auto* view=new BMenu("View");add(view,"Show / Hide Files",kToggleSidebar,'B');add(view,"Show / Hide Terminal",kToggleTerminal,'`');add(view,"Source Control",kToggleGit,'G',B_SHIFT_KEY);view->AddSeparatorItem();
@@ -265,6 +268,7 @@ void Workspace::FocusWorkspace() {
 void Workspace::OpenProject(const std::string& input) {
     auto path=CanonicalPath(input);std::error_code error;
     if(!fs::is_directory(path,error)) { Notice("Cannot open that folder.");return; }
+    if(!fRestoring) RememberRecent(path,true);
     bool changed=fProject!=path;
     fProject=path;++fGeneration;fIndex=std::make_shared<ProjectIndex>();fGitRoot.clear();fExplorer->Clear();fGit->SetRepository("");
     SetTitle((fs::path(path).filename().string()+" — Kiri").c_str());
@@ -302,6 +306,7 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
     auto path=CanonicalPath(input);
     if(fRestoring && fRestoringDrafts) { if(std::find(fRestorePaths.begin(),fRestorePaths.end(),path)==fRestorePaths.end()) fRestorePaths.push_back(path);return; }
     for(size_t i=0;i<fDocuments.size();++i) if(fDocuments[i]->path==path) {
+        if(activate) RememberRecent(path,false);
         auto* d=fDocuments[i].get();
         if(d->external && d->editor) {
             int32 choice=(new BAlert("Reload File","This file changed on disk. Reloading will replace the contents in this tab.","Cancel","Reload",nullptr,B_WIDTH_AS_USUAL,B_WARNING_ALERT))->Go();
@@ -347,6 +352,7 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
             auto* original=ByID(originalID);
             bool front=activate && focus==fFocusSerial && (!original || !original->editor || original->editor->Revision()==originalRevision);
             fDocumentsLayout->AddView(d->view);fDocuments.push_back(std::move(d));
+            if(activate) RememberRecent(path,false);
             if(front) SelectTab(fDocuments.size()-1);else UpdateTabs();
             if(auto* editor=fDocuments.back()->editor) {
                 auto restored=fRestoreDocuments.find(path);
@@ -391,6 +397,7 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
                 document->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();Notice(error);(new BAlert("Save File",error.c_str(),"OK"))->Go();return;
             }
             document->path=path;document->name=fs::path(path).filename().string();document->stamp=stamp;document->external=false;
+            RememberRecent(path,false);
             std::string_view saved(*text);if(document->bom) saved.remove_prefix(3);
             if(document->editor->Matches(saved)) { document->editor->MarkSaved();ClearRecovery(*document); }
             document->editor->SetLanguage(path,stamp.size>8*1024*1024);UpdateTabs();SaveSettings();
@@ -483,6 +490,7 @@ void Workspace::ApplyTheme(int index) {
     MarkTheme(fThemes,fEditorSettings.theme);
     if(fPreferencesWindow.IsValid()) { BMessage settings(kSyncPreferences);fEditorSettings.WriteTo(settings);fPreferencesWindow.SendMessage(&settings); }
     SaveSettings();
+    be_app->PostMessage(kRecentsChanged);
 }
 void Workspace::ShowPreferences() {
     if(fPreferencesWindow.IsValid()) { fPreferencesWindow.SendMessage(kShowPreferences);return; }
@@ -519,18 +527,23 @@ void Workspace::CopyPermalink() {
     });
 }
 
-void Workspace::RestoreSettings() {
+void Workspace::RememberRecent(const std::string& path,bool folder) {
+    if(RecentItems(fSettings).Remember(path,folder)) be_app->PostMessage(kRecentsChanged);
+}
+void Workspace::RestoreSettings(bool restoreSession) {
     BFile file((fSettings+"/settings").c_str(),B_READ_ONLY);BMessage settings;
     settings.Unflatten(&file);fRestoring=true;
     fEditorSettings.ReadFrom(settings);
     BRect frame;if(settings.FindRect("frame",&frame)==B_OK && frame.Width()>600 && frame.Height()>400) { MoveTo(frame.LeftTop());ResizeTo(frame.Width(),frame.Height()); }
-    const char* project=nullptr;if(settings.FindString("project",&project)==B_OK && project && *project) OpenProject(project);
-    const char* path=nullptr;
-    for(int32 i=0;settings.FindString("file",i,&path)==B_OK;++i) fRestorePaths.push_back(path);
-    BMessage state;
-    for(int32 i=0;settings.FindMessage("document",i,&state)==B_OK;++i)
-        if(state.FindString("path",&path)==B_OK) fRestoreDocuments[path]=state;
-    if(settings.FindString("selected",&path)==B_OK) fRestoreSelected=path;
+    if(restoreSession) {
+        const char* project=nullptr;if(settings.FindString("project",&project)==B_OK && project && *project) OpenProject(project);
+        const char* path=nullptr;
+        for(int32 i=0;settings.FindString("file",i,&path)==B_OK;++i) fRestorePaths.push_back(path);
+        BMessage state;
+        for(int32 i=0;settings.FindMessage("document",i,&state)==B_OK;++i)
+            if(state.FindString("path",&path)==B_OK) fRestoreDocuments[path]=state;
+        if(settings.FindString("selected",&path)==B_OK) fRestoreSelected=path;
+    }
     auto drafts=ListDrafts(fRecoveryDirectory);fRestoringDrafts=drafts.size();
     for(const auto& draft:drafts) RestoreDraft(draft);
     FinishRestore();
@@ -661,6 +674,8 @@ void Workspace::MessageReceived(BMessage* message) {
         int32 index=fSelected;message->FindInt32("index",&index);return static_cast<int>(index);
     };
     switch(message->what) {
+        case kShowLauncher:be_app->PostMessage(kShowLauncher);break;
+        case kActivateWorkspace:Activate();break;
         case kWorkDone:fJobs->Drain();if(fRecoveryJobs) fRecoveryJobs->Drain();break;
         case kRecoveryTick:RecoveryTick();break;
         case kPulse:Pulse();break;
@@ -680,7 +695,7 @@ void Workspace::MessageReceived(BMessage* message) {
                 int64 line=1,column=1;message->FindInt64("line",&line);message->FindInt64("column",&column);OpenFile(path,line,column);break;
             }
             int32 index;
-            if(message->FindInt32("index",&index)==B_OK) {
+            if(!message->HasBool("file_picker") && message->FindInt32("index",&index)==B_OK) {
                 auto* item=static_cast<FileItem*>(fExplorer->ItemAt(index));if(item && !item->placeholder && !item->entry.directory) OpenFile(item->entry.path);break;
             }
             BMessage selected(kFileChosen);BMessenger target(this);
