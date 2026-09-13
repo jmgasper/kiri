@@ -153,14 +153,6 @@ Workspace::Workspace(const std::string& settingsDirectory):BWindow(BRect(40,70,1
     fRecoveryDirectory=fSettings+"/recovery";create_directory(fRecoveryDirectory.c_str(),0700);
     fSessionToken=std::to_string(time(nullptr))+"-"+std::to_string(getpid());
     fRecoveryJobs=std::make_unique<AsyncQueue>(BMessenger(this));
-    fProjectTitle=new BStringView("project title","KIRI  /  No Project");fProjectTitle->SetFont(be_bold_font);
-    auto* open=new BButton("open project","Open Folder…",new BMessage(kOpenProject));
-    auto* files=new BButton("show files","Files",new BMessage(kToggleSidebar));
-    auto* git=new BButton("show git","Git",new BMessage(kToggleGit));
-    auto* terminal=new BButton("show terminal","Terminal",new BMessage(kToggleTerminal));
-    auto* quick=new BButton("quick open","Open Quickly",new BMessage(kQuickOpen));
-    auto* toolbar=new BView("toolbar",0);
-    BLayoutBuilder::Group<>(toolbar,B_HORIZONTAL,8).SetInsets(12,8,12,8).Add(fProjectTitle).AddGlue().Add(open).Add(quick).Add(files).Add(git).Add(terminal);
     fExplorer=new Explorer();fExplorer->requestDirectory=[this](std::string path){LoadDirectory(path);};
     fRefresh=new RefreshButton(new BMessage(kRefresh));
     auto* sidebar=new BView("sidebar",0);
@@ -194,7 +186,7 @@ Workspace::Workspace(const std::string& settingsDirectory):BWindow(BRect(40,70,1
     sidebar->SetExplicitMinSize(BSize(170,150));sidebar->SetExplicitMaxSize(BSize(600,B_SIZE_UNLIMITED));
     fStatus=new BStringView("status","Ready");fStatus->SetExplicitMinSize(BSize(200,25));
     auto* menu=BuildMenus();
-    BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(menu).Add(toolbar).Add(fSidebarSplit).Add(fStatus);
+    BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(menu).Add(fSidebarSplit).Add(fStatus);
     for(int32 i=0;i<CountChildren();++i) ThemeView(ChildAt(i),Theme::Builtins()[0]);
     ResizeTo(1195,685);
     RestoreSettings();ApplyTheme(fEditorSettings.theme);
@@ -275,7 +267,7 @@ void Workspace::OpenProject(const std::string& input) {
     if(!fs::is_directory(path,error)) { Notice("Cannot open that folder.");return; }
     bool changed=fProject!=path;
     fProject=path;++fGeneration;fIndex=std::make_shared<ProjectIndex>();fGitRoot.clear();fExplorer->Clear();fGit->SetRepository("");
-    fProjectTitle->SetText(("KIRI  /  "+fs::path(path).filename().string()).c_str());SetTitle((fs::path(path).filename().string()+" — Kiri").c_str());
+    SetTitle((fs::path(path).filename().string()+" — Kiri").c_str());
     Notice("Opening project…");auto generation=fGeneration;
     LoadDirectory(path);
     fJobs->Submit([this,path,generation](const auto& cancel) {

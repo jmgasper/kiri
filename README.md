@@ -4,7 +4,7 @@ A native C++ project editor for Haiku, with a file tree, source editing, an
 embedded terminal and a Git workspace. Kiri uses Haiku's Interface Kit,
 Scintilla, Lexilla and libvterm. There is no browser or web UI runtime.
 
-**0.1.0 beta 3** builds and runs on Haiku R1/beta5 x86_64. The application has
+**0.1.0 beta 4** builds and runs on Haiku R1/beta5 x86_64. The application has
 been exercised in QEMU/KVM, including real editing, staging and committing,
 crash recovery, image previews and a 200 MiB document. See the
 [verification record](docs/STATUS.md) and [performance measurements](docs/PERFORMANCE.md).
@@ -16,7 +16,7 @@ crash recovery, image previews and a 200 MiB document. See the
 Install the package from `artifacts/` on Haiku:
 
 ```sh
-pkgman install ./artifacts/kiri-0.1.0~beta3-1-x86_64.hpkg
+pkgman install ./artifacts/kiri-0.1.0~beta4-1-x86_64.hpkg
 /boot/system/apps/Kiri /path/to/project
 ```
 
@@ -42,8 +42,10 @@ the native release artifact is built with the Makefile.
 
 ## Workspace
 
-- **Open Folder** sets the lazy file tree, project index, Git repository and
+- **File → Open Folder…** sets the lazy file tree, project index, Git repository and
   terminal directory. Expand folders and double-click files to open them.
+  The window title shows the project folder. **View** contains controls for
+  showing and hiding the file tree, terminal and source control workspace.
   The refresh icon beside **FILES** picks up files created outside Kiri.
   The tree and document tabs show Haiku's native icons for source files, text,
   web pages, images, archives and other basic file types, with a generic fallback.
@@ -53,7 +55,7 @@ the native release artifact is built with the Makefile.
   keep their save prompts, and Cancel stops the remaining closes.
   Editing includes undo/redo, multiple selections, folding,
   indentation, line numbers, wrapping, zoom, find/replace and go to line.
-- **Open Quickly** searches file paths. **Search Project** finds literal text
+- **Search → Open Quickly…** searches file paths. **Search Project** finds literal text
   and opens a result at its line and column. Newer queries cancel older work.
 - **Edit → Preferences…** (Alt+,) opens editor preferences. Choose an installed
   font, a size from 8 to 48 points, and a theme with a live code preview.
@@ -75,7 +77,7 @@ the native release artifact is built with the Makefile.
   project directory. Tabs retain their directory, variables and scrollback while
   other sessions run. Changing projects starts a new tab and preserves existing
   shells. Close a session with its tab’s close control; closing the last session
-  hides the panel, and the toolbar’s **Terminal** control opens it again.
+  hides the panel, and **Terminal → Show / Hide** opens it again.
 - Each terminal is a real PTY with UTF-8, ANSI colors, scrollback and alternate-screen
   programs. Drag across rows to select output; Copy and Paste use the system clipboard.
 

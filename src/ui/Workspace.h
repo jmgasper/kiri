@@ -108,7 +108,6 @@ private:
     BCardLayout* fModeLayout;
     BSplitView* fSidebarSplit;
     BSplitView* fTerminalSplit;
-    BStringView* fProjectTitle;
     BStringView* fStatus;
     BView* fFindBar;
     BTextControl* fFindText;

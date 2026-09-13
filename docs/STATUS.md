@@ -1,10 +1,13 @@
-# Beta 3 verification record
+# Beta 4 verification record
 
 Verified September 13, 2026 on Haiku R1/beta5 x86_64, hrev57937+113, in
 QEMU/KVM with 4 vCPUs and 4 GiB RAM. Native build: GCC 13.3, Scintilla 5.3.4,
 Lexilla 5.4.6. Portable core also built and tested with Linux GCC 13.3.
 
 ## Automated checks
+
+The suites below passed for beta 3. Beta 4 removes workspace chrome only;
+it was rebuilt natively and received the focused interaction checks below.
 
 - **163 core checks pass on Linux and Haiku.** Coverage includes literal
   subprocess arguments, timeout/cancellation/output limits; UTF-8 boundaries,
@@ -25,6 +28,15 @@ Lexilla 5.4.6. Portable core also built and tested with Linux GCC 13.3.
   and line counts and a 100,001-file index. See [measurements](PERFORMANCE.md).
 
 ## Observed native interaction
+
+Beta 4 removes the project breadcrumb and the entire top button row. The
+file tree and editor sit directly below the menu bar, with the project folder
+in the window title. In a fresh isolated application instance, Alt+Shift+O
+opened the folder picker and Alt+P opened Quick Open. Alt+B, Alt+Shift+G and
+Alt+` hid and restored the file tree, source control and terminal respectively.
+The View menu retained all three controls, and Alt+Shift+T opened a third
+terminal whose `pwd` output confirmed the project directory. Existing sessions
+remained open throughout the checks.
 
 Beta 3 used another isolated application signature and settings directory so
 the existing Kiri sessions could remain open. **Edit → Preferences** / Alt+,
@@ -56,7 +68,7 @@ beta 3 reran the portable suite and expanded native checks for preferences and i
 
 | Area | Evidence |
 | --- | --- |
-| Workspace | Native toolbar, file tree, resizable panels, scrolling tabs, keyboard navigation, line gutter, file-type icons and ten color themes. |
+| Workspace | Native menus, file tree, resizable panels, scrolling tabs, keyboard navigation, line gutter, file-type icons and ten color themes. |
 | Source files | C++, HTML, JSON, XML and Python render with highlighting; go to line and project-search navigation reach the requested location. |
 | Editing and saving | Native Save As, existing-file save, consecutive untitled files through Save All, clipboard and undo/redo. Cancelling quit after an earlier Discard leaves both remaining documents dirty. |
 | Recovery | Force-killed Kiri with an unsaved two-line draft, restarted it, verified the text and dirty state, then saved it and confirmed draft cleanup. |
