@@ -1,0 +1,42 @@
+# Native Haiku build; needs only the development tools bundled with Haiku.
+CXX ?= g++
+CC ?= gcc
+BUILD ?= build-haiku
+CPPFLAGS += -Isrc -Ivendor/libvterm/include -I/boot/system/develop/headers/scintilla -I/boot/system/develop/headers/lexilla
+CXXFLAGS ?= -O2 -g
+CXXFLAGS += -std=c++17 -Wall -Wextra -Wno-multichar -Wno-misleading-indentation
+CFLAGS ?= -O2
+CFLAGS += -std=c99
+CORE = $(wildcard src/core/*.cpp)
+UI = $(wildcard src/ui/*.cpp) src/main.cpp
+VTERM = $(wildcard vendor/libvterm/src/*.c)
+CORE_OBJ = $(CORE:%.cpp=$(BUILD)/%.o)
+UI_OBJ = $(UI:%.cpp=$(BUILD)/%.o)
+VTERM_OBJ = $(VTERM:%.c=$(BUILD)/%.o)
+LIBS = -lbe -ltracker -ltranslation -lscintilla -llexilla
+.PHONY: all check check-native package clean
+all: $(BUILD)/Kiri
+$(BUILD)/Kiri: $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) resources/Kiri.rdef
+	$(CXX) -o $@.new $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) $(LIBS)
+	rc -o $(BUILD)/Kiri.rsrc resources/Kiri.rdef
+	xres -o $@.new $(BUILD)/Kiri.rsrc
+	mv $@.new $@
+$(BUILD)/%.o: %.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
+$(BUILD)/%.o: %.c
+	mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+$(BUILD)/kiri_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/tests/CoreTests.o
+	$(CXX) -o $@ $^ -lbe
+check: $(BUILD)/kiri_tests
+	$(BUILD)/kiri_tests
+$(BUILD)/kiri_native_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/src/ui/Editor.o $(BUILD)/src/ui/Theme.o $(BUILD)/tests/NativeTests.o
+	$(CXX) -o $@ $^ $(LIBS)
+check-native: $(BUILD)/kiri_native_tests
+	$(BUILD)/kiri_native_tests
+package: all
+	bash tools/package-haiku.sh
+clean:
+	rm -rf $(BUILD)
+-include $(CORE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(VTERM_OBJ:.o=.d) $(BUILD)/tests/CoreTests.d $(BUILD)/tests/NativeTests.d

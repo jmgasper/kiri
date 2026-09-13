@@ -1,0 +1,106 @@
+#pragma once
+#include "core/FileIO.h"
+#include "core/Project.h"
+#include "core/Recovery.h"
+#include "ui/Async.h"
+#include "ui/Theme.h"
+#include <Window.h>
+#include <memory>
+#include <set>
+#include <map>
+#include <deque>
+#include <vector>
+class BFilePanel;class BCardLayout;class BSplitView;class BStringView;
+class BTextControl;class BCheckBox;class BMessageRunner;
+class BMenuBar;
+namespace kiri {
+class Editor;class Explorer;class GitView;class TerminalView;class TabStrip;
+class Workspace:public BWindow {
+public:
+    Workspace();
+    ~Workspace() override;
+    void MessageReceived(BMessage* message) override;
+    bool QuitRequested() override;
+    void OpenProject(const std::string& path);
+    void OpenFile(const std::string& path,size_t line=1,size_t column=1,bool activate=true);
+private:
+    struct Document {
+        int64 id=0,revision=0;
+        std::string path,name;
+        BView* view=nullptr;
+        Editor* editor=nullptr;
+        FileStamp stamp;
+        bool bom=false,saving=false,closeAfterSave=false,external=false;
+        std::string recoveryFile;
+        int64 recoveryRevision=-1,lastRecovery=0;
+        bool recovering=false;
+    };
+    Document* Current();
+    Document* ByID(int64 id);
+    BMenuBar* BuildMenus();
+    void UpdateTabs();
+    void UpdateStatus();
+    void SelectTab(int index);
+    bool CloseTab(int index);
+    void NewFile();
+    void Save(Document* document,bool saveAs=false);
+    void SaveTo(int64 id,const std::string& path);
+    void ContinueSaveAll();
+    void ApplyTheme(int index);
+    void ShowFind();
+    void Search(bool projectSearch);
+    void PromptLine();
+    void CopyPermalink();
+    void LoadDirectory(const std::string& path);
+    void RefreshIndex();
+    void RestoreSettings();
+    void SaveSettings();
+    void FinishRestore();
+    void RestoreDraft(const std::string& file);
+    void StartRecovery();
+    void RecoveryTick();
+    void ClearRecovery(Document& document);
+    void Pulse();
+    void Notice(const std::string& text);
+    std::unique_ptr<AsyncQueue> fJobs;
+    std::unique_ptr<Editor> fLoaderFactory;
+    std::unique_ptr<AsyncQueue> fRecoveryJobs;
+    std::unique_ptr<BFilePanel> fFolderPanel,fOpenPanel,fSavePanel;
+    std::unique_ptr<BMessageRunner> fPulse;
+    std::unique_ptr<BMessageRunner> fRecoveryTimer;
+    struct Snapshot { int64 id,revision;size_t total,offset=0;std::shared_ptr<Draft> draft; };
+    std::unique_ptr<Snapshot> fSnapshot;
+    std::vector<std::unique_ptr<Document>> fDocuments;
+    std::set<std::string> fPendingOpen;
+    std::shared_ptr<ProjectIndex> fIndex=std::make_shared<ProjectIndex>();
+    std::string fProject,fGitRoot,fSettings;
+    int64 fGeneration=0,fNextID=1,fSavePanelID=0;
+    int64 fSavePanelToken=0;
+    int64 fFocusSerial=0;
+    bool fSavePanelAccepted=false;
+    int fSelected=-1,fThemeIndex=0;
+    bool fQuitWhenSaved=false,fDiskCheckPending=false;
+    std::map<int64,int64> fQuitDiscarded;
+    std::deque<int64> fSaveQueue;
+    std::string fRecoveryDirectory,fSessionToken,fRestoreSelected;
+    std::set<std::string> fRetiredDrafts;
+    std::map<std::string,BMessage> fRestoreDocuments;
+    std::vector<std::string> fRestorePaths;
+    int fRestoringDrafts=0;
+    bool fRestoring=false,fRestoreFilesStarted=false;
+    Explorer* fExplorer;
+    GitView* fGit;
+    TerminalView* fTerminal;
+    TabStrip* fTabs;
+    BCardLayout* fDocumentsLayout;
+    BCardLayout* fModeLayout;
+    BSplitView* fSidebarSplit;
+    BSplitView* fTerminalSplit;
+    BStringView* fProjectTitle;
+    BStringView* fStatus;
+    BView* fFindBar;
+    BTextControl* fFindText;
+    BTextControl* fReplaceText;
+    BCheckBox* fMatchCase;
+};
+}

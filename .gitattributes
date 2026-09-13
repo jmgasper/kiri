@@ -1,0 +1,2 @@
+# Preserve the pinned upstream sources, including their original whitespace.
+vendor/** -whitespace

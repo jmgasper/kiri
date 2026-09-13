@@ -1,0 +1,19 @@
+name kiri
+version 0.1.0~beta1-1
+architecture x86_64
+summary "A native project editor with Git and an embedded terminal"
+description "Kiri is a native C++ workspace for source files, images and large projects. It includes syntax highlighting, themes, a lazy file explorer, Git history and diffs, commits, GitHub line permalinks, project search and a PTY terminal."
+packager "Kiri contributors"
+vendor "Kiri"
+copyrights { "2026 Kiri contributors" "2008 Paul Evans <leonerd@leonerd.org.uk>" }
+licenses { "MIT" }
+provides {
+    kiri = 0.1.0~beta1
+    app:Kiri = 0.1.0~beta1
+}
+requires {
+    haiku >= r1~beta5
+    lib:libscintilla >= 5.3.4
+    lib:liblexilla >= 5.4.6
+    cmd:git
+}

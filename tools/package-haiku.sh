@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+KIRI_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$KIRI_ROOT"
+make -j4
+KIRI_STAGE=$(mktemp -d /tmp/kiri-package-XXXXXX)
+trap 'rm -rf -- "$KIRI_STAGE"' EXIT
+mkdir -p "$KIRI_STAGE/apps" "$KIRI_STAGE/documentation/packages/kiri/vendor/libvterm" \
+    "$KIRI_STAGE/data/deskbar/menu/Applications" "$KIRI_ROOT/artifacts"
+cp build-haiku/Kiri "$KIRI_STAGE/apps/Kiri"
+strip --strip-debug "$KIRI_STAGE/apps/Kiri"
+cp resources/Kiri.PackageInfo "$KIRI_STAGE/.PackageInfo"
+cp README.md LICENSE "$KIRI_STAGE/documentation/packages/kiri/"
+cp -R docs "$KIRI_STAGE/documentation/packages/kiri/"
+cp vendor/libvterm/LICENSE vendor/libvterm/UPSTREAM.md "$KIRI_STAGE/documentation/packages/kiri/vendor/libvterm/"
+ln -s ../../../../apps/Kiri "$KIRI_STAGE/data/deskbar/menu/Applications/Kiri"
+package create -C "$KIRI_STAGE" "$KIRI_ROOT/artifacts/kiri-0.1.0~beta1-1-x86_64.hpkg"
+printf '%s\n' "$KIRI_ROOT/artifacts/kiri-0.1.0~beta1-1-x86_64.hpkg"

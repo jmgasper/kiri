@@ -1,0 +1,20 @@
+resource app_signature "application/x-vnd.Kiri-editor";
+resource app_flags B_SINGLE_LAUNCH;
+resource app_version {
+    major = 0,
+    middle = 1,
+    minor = 0,
+    variety = B_APPV_DEVELOPMENT,
+    internal = 1,
+    short_info = "Kiri — native code editor",
+    long_info = "A fast, native project editor for Haiku with Git and an embedded terminal."
+};
+resource file_types message {
+    "types" = "text/plain",
+    "types" = "text/x-source-code",
+    "types" = "text/x-c++src",
+    "types" = "text/x-csrc",
+    "types" = "text/html",
+    "types" = "application/json",
+    "types" = "text/xml"
+};
