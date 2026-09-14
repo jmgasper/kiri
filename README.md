@@ -1,5 +1,7 @@
 # Kiri
 
+<img src="resources/branding/kiri-icon-256.png" width="128" height="128" alt="Kiri application icon">
+
 A native C++ project editor for Haiku, with a file tree, source editing, an
 embedded terminal and a Git workspace. Kiri uses Haiku's Interface Kit,
 Scintilla, Lexilla and libvterm. There is no browser or web UI runtime.
