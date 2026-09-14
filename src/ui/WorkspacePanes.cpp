@@ -210,6 +210,18 @@ BMessage Workspace::ViewState(const Tab& tab) const {
         state.AddInt64("caret",editor->SendMessage(SCI_GETCURRENTPOS));state.AddInt64("anchor",editor->SendMessage(SCI_GETANCHOR));
         state.AddInt64("first",editor->SendMessage(SCI_GETFIRSTVISIBLELINE));state.AddInt32("zoom",editor->SendMessage(SCI_GETZOOM));
         state.AddInt32("wrap",editor->SendMessage(SCI_GETWRAPMODE));state.AddInt64("xoffset",editor->SendMessage(SCI_GETXOFFSET));
+        state.AddInt32("selection_mode",editor->SendMessage(SCI_GETSELECTIONMODE));
+        state.AddInt32("main_selection",editor->SendMessage(SCI_GETMAINSELECTION));
+        for(sptr_t i=0;i<editor->SendMessage(SCI_GETSELECTIONS);++i) {
+            BMessage selection;selection.AddInt64("caret",editor->SendMessage(SCI_GETSELECTIONNCARET,i));
+            selection.AddInt64("anchor",editor->SendMessage(SCI_GETSELECTIONNANCHOR,i));
+            selection.AddInt64("caret_space",editor->SendMessage(SCI_GETSELECTIONNCARETVIRTUALSPACE,i));
+            selection.AddInt64("anchor_space",editor->SendMessage(SCI_GETSELECTIONNANCHORVIRTUALSPACE,i));state.AddMessage("selection",&selection);
+        }
+        state.AddInt64("rectangle_caret",editor->SendMessage(SCI_GETRECTANGULARSELECTIONCARET));
+        state.AddInt64("rectangle_anchor",editor->SendMessage(SCI_GETRECTANGULARSELECTIONANCHOR));
+        state.AddInt64("rectangle_caret_space",editor->SendMessage(SCI_GETRECTANGULARSELECTIONCARETVIRTUALSPACE));
+        state.AddInt64("rectangle_anchor_space",editor->SendMessage(SCI_GETRECTANGULARSELECTIONANCHORVIRTUALSPACE));
         for(sptr_t line=editor->SendMessage(SCI_CONTRACTEDFOLDNEXT,0);line>=0;line=editor->SendMessage(SCI_CONTRACTEDFOLDNEXT,line+1)) state.AddInt64("fold",line);
     }return state;
 }
@@ -222,6 +234,24 @@ void Workspace::RestoreView(Tab& tab,const BMessage& state) {
     int64 line=0;for(int32 i=0;state.FindInt64("fold",i,&line)==B_OK;++i) if(line>=0 && line<editor->SendMessage(SCI_GETLINECOUNT)) editor->SendMessage(SCI_FOLDLINE,line,SC_FOLDACTION_CONTRACT);
     auto length=editor->SendMessage(SCI_GETLENGTH);
     editor->SendMessage(SCI_SETSEL,std::clamp<int64>(anchor,0,length),std::clamp<int64>(caret,0,length));
+    int32 mode=SC_SEL_STREAM,main=0;state.FindInt32("selection_mode",&mode);state.FindInt32("main_selection",&main);
+    editor->SendMessage(SCI_SETSELECTIONMODE,std::clamp(mode,0,3));
+    BMessage selection;
+    for(int32 i=0;i<10000 && state.FindMessage("selection",i,&selection)==B_OK;++i) {
+        int64 c=0,a=0,cs=0,as=0;selection.FindInt64("caret",&c);selection.FindInt64("anchor",&a);
+        selection.FindInt64("caret_space",&cs);selection.FindInt64("anchor_space",&as);
+        editor->SendMessage(i?SCI_ADDSELECTION:SCI_SETSELECTION,std::clamp<int64>(c,0,length),std::clamp<int64>(a,0,length));
+        editor->SendMessage(SCI_SETSELECTIONNCARETVIRTUALSPACE,i,std::max<int64>(0,cs));
+        editor->SendMessage(SCI_SETSELECTIONNANCHORVIRTUALSPACE,i,std::max<int64>(0,as));
+    }
+    editor->SendMessage(SCI_SETMAINSELECTION,std::clamp<sptr_t>(main,0,editor->SendMessage(SCI_GETSELECTIONS)-1));
+    if(mode==SC_SEL_RECTANGLE || mode==SC_SEL_THIN) {
+        int64 value=0;
+        if(state.FindInt64("rectangle_caret",&value)==B_OK) editor->SendMessage(SCI_SETRECTANGULARSELECTIONCARET,std::clamp<int64>(value,0,length));
+        if(state.FindInt64("rectangle_anchor",&value)==B_OK) editor->SendMessage(SCI_SETRECTANGULARSELECTIONANCHOR,std::clamp<int64>(value,0,length));
+        if(state.FindInt64("rectangle_caret_space",&value)==B_OK) editor->SendMessage(SCI_SETRECTANGULARSELECTIONCARETVIRTUALSPACE,std::max<int64>(0,value));
+        if(state.FindInt64("rectangle_anchor_space",&value)==B_OK) editor->SendMessage(SCI_SETRECTANGULARSELECTIONANCHORVIRTUALSPACE,std::max<int64>(0,value));
+    }
     editor->SendMessage(SCI_SETFIRSTVISIBLELINE,std::max<int64>(0,first));editor->SendMessage(SCI_SETXOFFSET,std::max<int64>(0,xoffset));
 }
 void Workspace::ReopenTab() {

@@ -6,6 +6,7 @@
 #include <File.h>
 #include <Path.h>
 #include <filesystem>
+#include <algorithm>
 
 namespace kiri {
 Application::Application(const std::string& directory,const char* signature)
@@ -13,11 +14,36 @@ Application::Application(const std::string& directory,const char* signature)
     RecentItems(fSettings).Load();
 }
 void Application::ReadyToRun() {
+    RecoverWindows();
     if(fWorkspace.IsValid()) return;
     // Recover unsaved work immediately after an abnormal exit.
     if(!ListDrafts(fSettings+"/recovery").empty()) {
         auto* window=new Workspace(fSettings);fWorkspace=BMessenger(window);window->Show();
-    } else ShowLauncher();
+    } else if(!fWorkspaces.empty()) fWorkspace=fWorkspaces.back();
+    else ShowLauncher();
+}
+void Application::RecoverWindows() {
+    std::error_code error;
+    for(const auto& entry:std::filesystem::directory_iterator(fSettings+"/windows",error)) {
+        if(!entry.is_directory(error)) continue;
+        auto directory=entry.path().string();
+        if(!std::filesystem::exists(entry.path()/"settings",error) && ListDrafts(directory+"/recovery").empty()) continue;
+        auto* window=new Workspace(fSettings,true,directory);window->Show();
+        fWorkspaces.push_back(BMessenger(window));
+    }
+}
+bool Application::QuitRequested() {
+    fWorkspaces.erase(std::remove_if(fWorkspaces.begin(),fWorkspaces.end(),[](const auto& item){return !item.IsValid();}),fWorkspaces.end());
+    if(fWorkspaces.empty()) return BApplication::QuitRequested();
+    // A workspace may finish its save asynchronously before it can close.
+    // Resume the application quit on its close notification, one window at a time.
+    if(!fQuitting) { fQuitting=true;ContinueQuit(); }
+    return false;
+}
+void Application::ContinueQuit() {
+    if(fWorkspaces.empty()) { PostMessage(B_QUIT_REQUESTED);return; }
+    fClosingWorkspace=fWorkspace.IsValid()?fWorkspace:fWorkspaces.back();
+    fClosingWorkspace.SendMessage(B_QUIT_REQUESTED);
 }
 void Application::ShowLauncher() {
     if(fLauncher.IsValid()) fLauncher.SendMessage(kShowLauncher);
@@ -59,7 +85,27 @@ void Application::MessageReceived(BMessage* message) {
         case kOpenProject:case kOpenFile:case kNewFile:Open(*message);break;
         case kShowLauncher:ShowLauncher();break;
         case kRecentsChanged:if(fLauncher.IsValid()) fLauncher.SendMessage(kRecentsChanged);break;
-        case kLauncherClosed:if(!fWorkspace.IsValid()) PostMessage(B_QUIT_REQUESTED);break;
+        case kWorkspaceOpened:case kWorkspaceActivated: {
+            BMessenger window;if(message->FindMessenger("workspace",&window)!=B_OK || !window.IsValid()) break;
+            if(std::find(fWorkspaces.begin(),fWorkspaces.end(),window)==fWorkspaces.end()) fWorkspaces.push_back(window);
+            if(message->what==kWorkspaceActivated || !fWorkspace.IsValid()) fWorkspace=window;
+            break;
+        }
+        case kWorkspaceClosed: {
+            BMessenger window;message->FindMessenger("workspace",&window);
+            fWorkspaces.erase(std::remove_if(fWorkspaces.begin(),fWorkspaces.end(),[&](const auto& item){return item==window || !item.IsValid();}),fWorkspaces.end());
+            if(fWorkspace==window || !fWorkspace.IsValid()) fWorkspace=fWorkspaces.empty()?BMessenger():fWorkspaces.back();
+            if(fQuitting) {
+                if(window==fClosingWorkspace || !fClosingWorkspace.IsValid()) { fClosingWorkspace=BMessenger();ContinueQuit(); }
+            } else if(fWorkspaces.empty()) PostMessage(B_QUIT_REQUESTED);
+            break;
+        }
+        case kWorkspaceQuitCancelled: {
+            BMessenger window;message->FindMessenger("workspace",&window);
+            if(window==fClosingWorkspace) { fQuitting=false;fClosingWorkspace=BMessenger(); }
+            break;
+        }
+        case kLauncherClosed:if(!fWorkspace.IsValid() && fWorkspaces.empty()) PostMessage(B_QUIT_REQUESTED);break;
         case B_SILENT_RELAUNCH:if(fWorkspace.IsValid()) fWorkspace.SendMessage(kActivateWorkspace);else ShowLauncher();break;
         default:BApplication::MessageReceived(message);
     }

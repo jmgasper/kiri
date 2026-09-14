@@ -39,7 +39,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
         src/ui/TerminalPanel.cpp src/ui/RefreshButton.cpp
         src/ui/EditorSettings.cpp src/ui/PreferencesWindow.cpp src/ui/FileIcons.cpp
         src/ui/Application.cpp src/ui/LauncherWindow.cpp src/ui/RecentItems.cpp
-        src/ui/WorkspaceLanguage.cpp src/ui/WorkspacePanes.cpp src/ui/SymbolBar.cpp src/ui/LanguageToolsWindow.cpp)
+        src/ui/WorkspaceLanguage.cpp src/ui/WorkspacePanes.cpp src/ui/WorkspaceTabs.cpp src/ui/SymbolBar.cpp src/ui/LanguageToolsWindow.cpp)
     add_executable(Kiri src/main.cpp ${KIRI_UI_SOURCES})
     target_include_directories(Kiri PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
     target_compile_options(Kiri PRIVATE -Wall -Wextra -Wno-multichar)

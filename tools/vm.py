@@ -57,9 +57,31 @@ class QMP:
         time.sleep(0.08)
         self.command('input-send-event', events=[{'type': 'btn', 'data': {'button': button, 'down': False}}])
 
+    def move(self, x, y, width, height):
+        self.command('input-send-event', events=[
+            {'type': 'abs', 'data': {'axis': 'x', 'value': int(x * 32767 / width)}},
+            {'type': 'abs', 'data': {'axis': 'y', 'value': int(y * 32767 / height)}}])
+
+    def drag(self, x, y, end_x, end_y, width, height):
+        self.move(x, y, width, height)
+        # Fresh tablet motion also settles the pointer after typing obscures it.
+        time.sleep(0.2)
+        self.move(x + 1 if x + 1 < width else x - 1, y, width, height)
+        time.sleep(0.1)
+        self.move(x, y, width, height)
+        time.sleep(0.2)
+        self.command('input-send-event', events=[{'type': 'btn', 'data': {'button': 'left', 'down': True}}])
+        try:
+            time.sleep(0.15)
+            for step in range(1, 21):
+                self.move(x + (end_x - x) * step / 20, y + (end_y - y) * step / 20, width, height)
+                time.sleep(0.04)
+        finally:
+            self.command('input-send-event', events=[{'type': 'btn', 'data': {'button': 'left', 'down': False}}])
+
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
-    p.add_argument('action', choices=['status', 'screenshot', 'key', 'type', 'click', 'right-click'])
+    p.add_argument('action', choices=['status', 'screenshot', 'key', 'type', 'click', 'right-click', 'drag'])
     p.add_argument('args', nargs='*')
     a = p.parse_args()
     q = QMP()
@@ -75,3 +97,5 @@ if __name__ == '__main__':
         q.type(a.args[0])
     elif a.action in ['click', 'right-click']:
         q.click(*map(int, a.args), button='right' if a.action == 'right-click' else 'left')
+    elif a.action == 'drag':
+        q.drag(*map(int, a.args))

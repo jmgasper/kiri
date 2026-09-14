@@ -148,15 +148,16 @@ private:
 };
 }
 
-Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession):BWindow(BRect(40,70,1235,755),"Kiri",B_TITLED_WINDOW,B_ASYNCHRONOUS_CONTROLS|B_AUTO_UPDATE_SIZE_LIMITS) {
+Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession,const std::string& sessionDirectory):BWindow(BRect(40,70,1235,755),"Kiri",B_TITLED_WINDOW,B_ASYNCHRONOUS_CONTROLS|B_AUTO_UPDATE_SIZE_LIMITS) {
     BPath settings;find_directory(B_USER_SETTINGS_DIRECTORY,&settings);settings.Append("Kiri");
     fSettings=settingsDirectory.empty()?settings.Path():settingsDirectory;create_directory(fSettings.c_str(),0755);
+    fSessionDirectory=sessionDirectory.empty()?fSettings:sessionDirectory;create_directory(fSessionDirectory.c_str(),0700);
     RecentItems(fSettings).Load();
     fLanguageTools.Load(fSettings);
     fJobs=std::make_unique<AsyncQueue>(BMessenger(this),2);
     fLoaderFactory=std::make_unique<Editor>();
-    fRecoveryDirectory=fSettings+"/recovery";create_directory(fRecoveryDirectory.c_str(),0700);
-    fSessionToken=std::to_string(time(nullptr))+"-"+std::to_string(getpid());
+    fRecoveryDirectory=fSessionDirectory+"/recovery";create_directory(fRecoveryDirectory.c_str(),0700);
+    fSessionToken=std::to_string(time(nullptr))+"-"+std::to_string(getpid())+"-"+std::to_string(system_time());
     fRecoveryJobs=std::make_unique<AsyncQueue>(BMessenger(this));
     fExplorer=new Explorer();fExplorer->requestDirectory=[this](std::string path){LoadDirectory(path);};
     fRefresh=new RefreshButton(new BMessage(kRefresh));
@@ -194,12 +195,18 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession):B
     BMessage pulse(kPulse);fPulse=std::make_unique<BMessageRunner>(BMessenger(this),&pulse,2000000);
     BMessage languages(kLanguageTick);fLanguageTimer=std::make_unique<BMessageRunner>(BMessenger(this),&languages,150000);
     if(fTerminal->Empty()) NewTerminal(false);
+    BMessage opened(kWorkspaceOpened);opened.AddMessenger("workspace",BMessenger(this));be_app->PostMessage(&opened);
 }
 Workspace::~Workspace() {
+    BMessage closed(kWorkspaceClosed);closed.AddMessenger("workspace",BMessenger(this));be_app->PostMessage(&closed);
     if(fPreferencesWindow.IsValid()) fPreferencesWindow.SendMessage(B_QUIT_REQUESTED);
     if(fLanguageToolsWindow.IsValid()) fLanguageToolsWindow.SendMessage(B_QUIT_REQUESTED);
-    fLanguageTimer.reset();for(auto& entry:fServers) if(entry.second.client) entry.second.client->Stop();fServers.clear();
+    fDetachTimer.reset();fLanguageTimer.reset();for(auto& entry:fServers) if(entry.second.client) entry.second.client->Stop();fServers.clear();
     fPulse.reset();fRecoveryTimer.reset();fRecoveryJobs.reset();fJobs.reset();
+}
+void Workspace::WindowActivated(bool active) {
+    BWindow::WindowActivated(active);
+    if(active) { BMessage message(kWorkspaceActivated);message.AddMessenger("workspace",BMessenger(this));be_app->PostMessage(&message); }
 }
 
 BMenuBar* Workspace::BuildMenus() {
@@ -211,7 +218,7 @@ BMenuBar* Workspace::BuildMenus() {
         menu->AddItem(new BMenuItem(title,message,key,modifiers));
     };
     auto* file=new BMenu("File");add(file,"New File",kNewFile,'N');add(file,"Open File…",kOpenFile,'O');add(file,"Open Folder…",kOpenProject,'O',B_SHIFT_KEY);add(file,"Show Launcher…",kShowLauncher);file->AddSeparatorItem();
-    add(file,"Save",kSave,'S');add(file,"Save As…",kSaveAs,'S',B_SHIFT_KEY);add(file,"Save All",kSaveAll);add(file,"Close Tab",kCloseTab,'W');add(file,"Keep Open",kKeepTab,'K');add(file,"Reopen Closed Tab",kReopenTab,'W',B_SHIFT_KEY);file->AddSeparatorItem();add(file,"Quit",B_QUIT_REQUESTED,'Q');bar->AddItem(file);
+    add(file,"Save",kSave,'S');add(file,"Save As…",kSaveAs,'S',B_SHIFT_KEY);add(file,"Save All",kSaveAll);add(file,"Close Tab",kCloseTab,'W');add(file,"Keep Open",kKeepTab,'K');add(file,"Reopen Closed Tab",kReopenTab,'W',B_SHIFT_KEY);file->AddSeparatorItem();add(file,"Quit",kQuitApplication,'Q');bar->AddItem(file);
     auto* edit=new BMenu("Edit");add(edit,"Undo",B_UNDO,'Z');add(edit,"Redo",B_REDO,'Z',B_SHIFT_KEY);edit->AddSeparatorItem();add(edit,"Cut",B_CUT,'X');add(edit,"Copy",B_COPY,'C');add(edit,"Paste",B_PASTE,'V');add(edit,"Select All",B_SELECT_ALL,'A');edit->AddSeparatorItem();
     add(edit,"Format with Prettier",kFormatPrettier);add(edit,"Complete Code",kComplete);add(edit,"Language Tools…",kShowLanguageTools);
     edit->AddSeparatorItem();add(edit,"Preferences…",kShowPreferences,',');bar->AddItem(edit);
@@ -230,6 +237,9 @@ Workspace::Document* Workspace::ByID(int64 id) { for(auto& document:fDocuments) 
 void Workspace::Notice(const std::string& text) { fStatus->SetText(text.c_str());fStatus->SetToolTip(text.c_str()); }
 void Workspace::UpdateStatus() {
     auto* d=Current();
+    if(fSessionDirectory!=fSettings) {
+        auto title=d?d->name+" — Kiri":std::string("Kiri");if(title!=Title()) SetTitle(title.c_str());
+    }
     if(!d) { Notice(fProject.empty()?"Open a folder to begin":fProject+" · "+std::to_string(fIndex->paths.size())+" indexed files");return; }
     std::string status=d->path.empty()?d->name:d->path;
     if(d->saving) status+="  ·  Saving…";
@@ -401,7 +411,7 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
     auto* d=ByID(id);if(!d || !d->editor || d->saving) return;
     std::string path=CanonicalPath(input);FileStamp expected=d->path==path?d->stamp:StatFile(path);
     for(const auto& other:fDocuments) if(other->id!=id && other->path==path) {
-        d->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;
+        d->closeAfterSave=false;CancelQuit();fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;
         Notice("That file is already open in another tab. Close that tab or choose another name.");return;
     }
     // Save As replacement was confirmed by the native BFilePanel.
@@ -413,7 +423,7 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
             auto* document=ByID(id);if(!document) return;
             document->saving=false;
             if(!error.empty()) {
-                document->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;Notice(error);(new BAlert("Save File",error.c_str(),"OK"))->Go();return;
+                document->closeAfterSave=false;CancelQuit();fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;Notice(error);(new BAlert("Save File",error.c_str(),"OK"))->Go();return;
             }
             if(document->path!=path) CloseLanguage(*document);
             document->path=path;document->name=fs::path(path).filename().string();document->stamp=stamp;document->external=false;
@@ -434,7 +444,7 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
         };
     },{},[this,id](const std::string& error) {
         if(auto* document=ByID(id)) { document->saving=false;document->closeAfterSave=false; }
-        fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;Notice("Save failed: "+error);
+        CancelQuit();fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;Notice("Save failed: "+error);
     });
 }
 void Workspace::ContinueSaveAll() {
@@ -445,6 +455,10 @@ void Workspace::ContinueSaveAll() {
         fSaveQueue.pop_front();
     }
 }
+void Workspace::CancelQuit() {
+    if(fQuitWhenSaved) { BMessage message(kWorkspaceQuitCancelled);message.AddMessenger("workspace",BMessenger(this));be_app->PostMessage(&message); }
+    fQuitWhenSaved=false;fQuitDiscarded.clear();
+}
 bool Workspace::QuitRequested() {
     if(!fQuitWhenSaved) fQuitDiscarded.clear();
     fQuitWhenSaved=true;
@@ -454,14 +468,20 @@ bool Workspace::QuitRequested() {
         auto discarded=fQuitDiscarded.find(d->id);
         if(discarded!=fQuitDiscarded.end() && discarded->second==d->editor->Revision()) continue;
         int32 choice=(new BAlert("Unsaved Changes",("Save changes to "+d->name+" before quitting?").c_str(),"Cancel","Discard","Save",B_WIDTH_AS_USUAL,B_WARNING_ALERT))->Go();
-        if(choice==0) { fQuitWhenSaved=false;fQuitDiscarded.clear();return false; }
+        if(choice==0) { CancelQuit();return false; }
         if(choice==2) { fQuitWhenSaved=true;Save(d.get());return false; }
         fQuitDiscarded[d->id]=d->editor->Revision();
     }
     fRecoveryTimer.reset();fSnapshot.reset();fRecoveryJobs.reset();
     for(const auto& d:fDocuments) if(!d->recoveryFile.empty()) fRetiredDrafts.insert(d->recoveryFile);
     for(const auto& file:fRetiredDrafts) unlink(file.c_str());
-    SaveSettings();be_app->PostMessage(B_QUIT_REQUESTED);return true;
+    SaveSettings();
+    // A deliberately closed detached window must not reappear at next launch.
+    // Its private session is retained on abnormal exit for recovery instead.
+    if(fSessionDirectory!=fSettings) {
+        unlink((fSessionDirectory+"/settings").c_str());rmdir(fRecoveryDirectory.c_str());rmdir(fSessionDirectory.c_str());
+    }
+    return true;
 }
 void Workspace::ApplyTheme(int index) {
     fEditorSettings.theme=std::clamp(index,0,static_cast<int>(Theme::Builtins().size())-1);const auto& theme=Theme::Builtins()[fEditorSettings.theme];
@@ -521,11 +541,13 @@ void Workspace::RememberRecent(const std::string& path,bool folder) {
     if(RecentItems(fSettings).Remember(path,folder)) be_app->PostMessage(kRecentsChanged);
 }
 void Workspace::RestoreSettings(bool restoreSession) {
-    BFile file((fSettings+"/settings").c_str(),B_READ_ONLY);BMessage settings;
+    BFile file((fSessionDirectory+"/settings").c_str(),B_READ_ONLY);BMessage settings;
+    bool hasSession=file.InitCheck()==B_OK;
+    if(file.InitCheck()!=B_OK && fSessionDirectory!=fSettings) file.SetTo((fSettings+"/settings").c_str(),B_READ_ONLY);
     settings.Unflatten(&file);fRestoring=true;
     fEditorSettings.ReadFrom(settings);bool previewTabs=true;if(settings.FindBool("preview_tabs",&previewTabs)==B_OK) fPreviewTabs=previewTabs;
     BRect frame;if(settings.FindRect("frame",&frame)==B_OK && frame.Width()>600 && frame.Height()>400) { MoveTo(frame.LeftTop());ResizeTo(frame.Width(),frame.Height()); }
-    if(restoreSession) {
+    if(restoreSession && hasSession) {
         settings.FindMessage("editor_layout",&fRestoreLayout);
         const char* project=nullptr;if(settings.FindString("project",&project)==B_OK && project && *project) OpenProject(project);
         const char* path=nullptr;
@@ -552,8 +574,8 @@ void Workspace::SaveSettings() {
         }
         settings.AddMessage("document",&state);
     }
-    BFile file((fSettings+"/settings.tmp").c_str(),B_WRITE_ONLY|B_CREATE_FILE|B_ERASE_FILE);
-    if(file.InitCheck()==B_OK && settings.Flatten(&file)==B_OK) { file.Sync();rename((fSettings+"/settings.tmp").c_str(),(fSettings+"/settings").c_str()); }
+    BFile file((fSessionDirectory+"/settings.tmp").c_str(),B_WRITE_ONLY|B_CREATE_FILE|B_ERASE_FILE);
+    if(file.InitCheck()==B_OK && settings.Flatten(&file)==B_OK) { file.Sync();rename((fSessionDirectory+"/settings.tmp").c_str(),(fSessionDirectory+"/settings").c_str()); }
 }
 void Workspace::FinishRestore() {
     if(!fRestoring || fRestoringDrafts) return;
@@ -653,6 +675,11 @@ void Workspace::Pulse() {
     });
 }
 void Workspace::MessageReceived(BMessage* message) {
+    if(message->what==kTabDragUpdate || message->what==kTabDragEnd || message->what==kTabDragCancel) { TrackTabDrag(*message);return; }
+    if(message->what==kDetachTabReady) {
+        auto id=fDetachTab;auto point=fDetachPoint;fDetachTimer.reset();fDetachTab=0;
+        if(id) DetachTab(id,point);return;
+    }
     // BMenuItem appends its menu position as "index". These menu commands
     // operate on the current tab; that position is not a document/session index.
     bool currentTab=false;
@@ -718,6 +745,7 @@ void Workspace::MessageReceived(BMessage* message) {
             }
             break;
         }
+        case kQuitApplication:be_app->PostMessage(B_QUIT_REQUESTED);break;
         case kShowLauncher:be_app->PostMessage(kShowLauncher);break;
         case kActivateWorkspace:Activate();break;
         case kWorkDone:fJobs->Drain();if(fRecoveryJobs) fRecoveryJobs->Drain();break;
@@ -781,7 +809,7 @@ void Workspace::MessageReceived(BMessage* message) {
         case B_CANCEL: {
             // BFilePanel also sends B_CANCEL when it hides after an accepted save.
             int64 token=0;if(message->FindInt64("panel_token",&token)!=B_OK || token!=fSavePanelToken || fSavePanelAccepted) break;
-            fQuitWhenSaved=false;fQuitDiscarded.clear();fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;if(auto* document=ByID(fSavePanelID)) document->closeAfterSave=false;break;
+            CancelQuit();fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;if(auto* document=ByID(fSavePanelID)) document->closeAfterSave=false;break;
         }
         case kCloseTab: {
             if(!message->HasInt64("tab_id") && !message->HasInt32("index") && fTerminal->OwnsFocus()) {

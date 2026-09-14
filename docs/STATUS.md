@@ -1,5 +1,33 @@
 # Verification record
 
+## Editor tab dragging — develop
+
+Verified September 14, 2026 on Haiku R1/beta5 in the isolated QEMU VM.
+The native build passed 264 workspace checks, 233 editor/worker checks,
+163 core checks and 80 language checks. Both Linux CMake/CTest suites passed.
+
+The workspace suite covers moves in both directions, insertion at either end,
+duplicate files in the destination, preview promotion, nested-pane collapse,
+unchanged close history, card order, multiple selections, scroll and zoom,
+dirty buffers, undo/redo, detached saves, deferred drops during a save,
+untitled drafts, images, binary previews and independent recovery directories.
+Shared views that remain in another window use independent text buffers.
+
+Real pointer input verified reordering, dropping into a nested pane's editor,
+scrolling a crowded 14-tab strip while holding a drag at its edge, Escape
+cancellation, invalid sidebar drops and detaching an unsaved tab. Closing the
+source window left the detached window editable and its Save wrote the expected
+file. Closing the final workspace exited the application. File → Quit stopped
+when cancelled, then on a fresh request saved two dirty windows in sequence
+and exited after their asynchronous saves completed.
+
+A separate production-startup harness was terminated with an unsaved detached
+window. Restarting without command-line files restored that window and its dirty
+state; saving produced an exact byte-for-byte match with the 1,010-byte recovery
+snapshot captured before termination. Test files, snapshots and logs remain in
+ignored VM directories. See [tab workflows](EDITOR_PANES.md) for behavior and
+[the VM guide](VM.md) for the pointer driver and inspection harness.
+
 ## Nested editor panes and tab workflows — develop
 
 Verified September 14, 2026 in the existing Haiku R1/beta5 QEMU VM. The native

@@ -2,6 +2,9 @@
 #include <SupportDefs.h>
 namespace kiri {
 enum : uint32 {
+    kTabDragUpdate='tbdm',kTabDragEnd='tbde',kTabDragCancel='tbdc',kTabDragTick='tbdt',kDetachTabReady='tbdr',
+    kWorkspaceOpened='wsop',kWorkspaceClosed='wscl',kWorkspaceActivated='wsac',
+    kQuitApplication='aqut',kWorkspaceQuitCancelled='wsqc',
     kSplitRight='sprt',kSplitDown='spdn',kNextPane='pnxt',kPreviousPane='pprv',kClosePane='pcls',kEditorFocus='edfc',
     kKeepTab='tbkp',kReopenTab='tbro',kPreviewTabs='tbpv',kQueryPreview='qypv',
     kFormatPrettier='prtf',kComplete='lcpl',kCompletionChosen='lcch',kCancelCompletion='lcca',kEditorText='edtx',kEditorTyped='edty',

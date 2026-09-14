@@ -63,6 +63,119 @@ struct WorkspaceTestAccess {
     static void Save(Workspace& w) {
         auto* d=w.Current();w.Save(d);Wait(w,[&]{return !d->saving;});CHECK(!d->editor->Dirty());
     }
+    static void CheckCards(Workspace& w) {
+        for(auto& pane:w.fPanes) {
+            CHECK(pane->cards->CountItems()==int(pane->tabs.size())+1);
+            CHECK(pane->cards->VisibleIndex()==pane->selected+1);
+            for(size_t i=0;i<pane->tabs.size();++i) {
+                CHECK(pane->cards->ItemAt(i+1)->View()==pane->tabs[i]->view);
+                CHECK(pane->tabs[i]->view->Window()==&w);
+            }
+        }
+    }
+    static void DragTabs(const std::string& root) {
+        auto settings=root+"/drag-settings",a=root+"/one.txt",b=root+"/two.txt",c=root+"/four.txt";
+        auto* w=new Workspace(settings,false);w->Show();CHECK(w->Lock());
+        Open(*w,a);auto first=w->CurrentTab()->id;auto* editor=w->CurrentTab()->editor;
+        Open(*w,b);auto second=w->CurrentTab()->id;Open(*w,c,true);auto third=w->CurrentTab()->id;
+        auto* left=w->fActivePane;auto history=w->fClosedTabs.size();
+        CHECK(w->MoveTab(third,*left,0));CHECK(!w->CurrentTab()->preview);
+        CHECK(left->tabs[0]->id==third && left->tabs[1]->id==first && left->tabs[2]->id==second);
+        CHECK(w->MoveTab(third,*left,3));CHECK(left->tabs[2]->id==third);
+        CHECK(w->MoveTab(first,*left,1));CHECK(left->tabs[0]->id==first); // Adjacent slot is a no-op.
+        CHECK(!w->MoveTab(first,*left,-1) && !w->MoveTab(99999,*left,0));CheckCards(*w);
+        editor->SendMessage(SCI_APPENDTEXT,5,reinterpret_cast<sptr_t>("drag!"));auto contents=editor->Text();
+        editor->SendMessage(SCI_SETSELECTION,20,10);editor->SendMessage(SCI_ADDSELECTION,80,70);
+        editor->SendMessage(SCI_SETMAINSELECTION,1);editor->SendMessage(SCI_SETZOOM,2);editor->SendMessage(SCI_SETFIRSTVISIBLELINE,35);
+        CHECK(w->MoveTab(first,*left,3));CHECK(w->CurrentTab()->editor==editor && editor->Dirty());
+        CHECK(editor->SendMessage(SCI_GETSELECTIONS)==2 && editor->SendMessage(SCI_GETSELECTIONNANCHOR,0)==10);
+        CHECK(editor->SendMessage(SCI_GETMAINSELECTION)==1 && editor->SendMessage(SCI_GETCURRENTPOS)==80);
+        CHECK(editor->SendMessage(SCI_GETFIRSTVISIBLELINE)==35);CHECK(editor->SendMessage(SCI_GETZOOM)==2);CheckCards(*w);
+        w->SplitPane(B_HORIZONTAL);auto* right=w->fActivePane;auto duplicate=w->CurrentTab()->id;
+        w->SplitPane(B_VERTICAL);auto* bottom=w->fActivePane;auto nested=bottom->id;
+        CHECK(w->MoveTab(second,*bottom,0));CHECK(w->Current()->path==b && bottom->tabs.size()==2);CheckCards(*w);
+        // A duplicate destination keeps the dragged view and never prompts for shared dirty text.
+        CHECK(w->MoveTab(first,*right,1));CHECK(!w->FindTab(duplicate));CHECK(w->CurrentTab()->editor==editor);
+        CHECK(w->ViewCount(w->Current()->id)==2 && editor->Matches(contents));
+        CHECK(w->fClosedTabs.size()==history);CheckCards(*w);
+        CHECK(w->MoveTab(bottom->tabs[1]->id,*right,0));CHECK(bottom->tabs.size()==1);
+        CHECK(w->MoveTab(second,*left,1));CHECK(!w->FindPane(nested) && w->fPanes.size()==2);CheckCards(*w);
+        // Moving the final tab out of a nested group retains its sibling and order on disk.
+        w->SaveSettings();BFile saved((settings+"/settings").c_str(),B_READ_ONLY);BMessage session,layout,leaf,view;
+        CHECK(session.Unflatten(&saved)==B_OK && session.FindMessage("editor_layout",&layout)==B_OK);
+        CHECK(layout.FindMessage("first",&leaf)==B_OK && leaf.FindMessage("tab",0,&view)==B_OK);
+        const char* path=nullptr;CHECK(view.FindString("path",&path)==B_OK && std::string(path)==c);
+
+        // Tear off a unique dirty view without copying or losing its undo history.
+        auto movedID=right->tabs[0]->id;auto* movedEditor=right->tabs[0]->editor;
+        w->ActivatePane(right,true);w->SelectTab(0);movedEditor->SendMessage(SCI_SETSEL,10,20);
+        auto pointer=movedEditor->SendMessage(SCI_GETDOCPOINTER);auto docID=w->Current()->id;
+        w->StartRecovery();Wait(*w,[&]{auto* d=w->ByID(docID);return !w->fSnapshot && !d->recovering && !d->recoveryFile.empty() && fs::exists(d->recoveryFile);});
+        auto oldDraft=w->Current()->recoveryFile;
+        auto* detached=w->DetachTab(movedID,BPoint(180,190));CHECK(detached && !w->FindTab(movedID));
+        CHECK(w->fPanes.size()==1 && !w->ByID(docID));CheckCards(*w);
+        CHECK(detached->Lock());CHECK(detached->CurrentTab()->editor==movedEditor);
+        CHECK(movedEditor->SendMessage(SCI_GETDOCPOINTER)==pointer && movedEditor->Matches(contents) && movedEditor->Dirty());
+        CHECK(movedEditor->SendMessage(SCI_GETCURRENTPOS)==20 && movedEditor->SendMessage(SCI_GETANCHOR)==10);
+        CHECK(detached->fSettings==settings && detached->fSessionDirectory!=settings);
+        CHECK(!fs::exists(oldDraft) && fs::exists(detached->Current()->recoveryFile));CheckCards(*detached);
+        CHECK(detached->Current()->serverKey.empty());auto detachedSession=detached->fSessionDirectory;
+        Wait(*detached,[&]{return !detached->fSnapshot && !detached->Current()->recovering;});
+        movedEditor->SendMessage(SCI_UNDO);CHECK(!movedEditor->Dirty());movedEditor->SendMessage(SCI_REDO);CHECK(movedEditor->Matches(contents));
+        Save(*detached);CHECK(ReadFile(a).bytes==contents);CHECK(detached->QuitRequested());detached->Quit();
+        CHECK(!fs::exists(detachedSession+"/settings"));
+
+        // Shared source views become independent buffers in different loopers.
+        w->ActivatePane(left,true);w->SelectTab(0);w->SplitPane(B_VERTICAL);auto* shared=w->CurrentTab()->editor;
+        shared->SendMessage(SCI_APPENDTEXT,6,reinterpret_cast<sptr_t>("shared"));auto sharedText=shared->Text();
+        auto sharedPointer=shared->SendMessage(SCI_GETDOCPOINTER);auto sharedID=w->CurrentTab()->id;
+        detached=w->DetachTab(sharedID,BPoint(200,200));CHECK(detached && !w->FindTab(sharedID));
+        CHECK(detached->Lock());CHECK(detached->CurrentTab()->editor->SendMessage(SCI_GETDOCPOINTER)!=sharedPointer);
+        CHECK(detached->CurrentTab()->editor->Matches(sharedText) && detached->CurrentTab()->editor->Dirty());
+        auto* original=left->tabs[0]->editor;CHECK(original->Matches(sharedText));
+        detached->CurrentTab()->editor->SendMessage(SCI_APPENDTEXT,1,reinterpret_cast<sptr_t>("!"));CHECK(original->Matches(sharedText));
+        Wait(*detached,[&]{return !detached->fSnapshot && !detached->Current()->recovering;});
+        auto recoverySession=detached->fSessionDirectory;detached->Current()->lastRecovery=0;detached->StartRecovery();
+        Wait(*detached,[&]{return !detached->fSnapshot && !detached->Current()->recovering;});
+        auto recoveredText=detached->CurrentTab()->editor->Text();detached->SaveSettings();detached->Quit();
+        detached=new Workspace(settings,true,recoverySession);detached->Show();CHECK(detached->Lock());Wait(*detached,[&]{return !detached->fRestoring;});
+        CHECK(detached->fDocuments.size()==1 && detached->CurrentTab()->editor->Matches(recoveredText));
+        CHECK(detached->CurrentTab()->editor->Dirty());Save(*detached);CHECK(detached->QuitRequested());detached->Quit();
+        original->SendMessage(SCI_UNDO);CHECK(!original->Dirty());
+
+        // Unsaved, unnamed documents can be detached, saved and undone too.
+        w->NewFile();auto untitled=w->CurrentTab()->id;auto* draft=w->CurrentTab()->editor;
+        draft->SendMessage(SCI_APPENDTEXT,5,reinterpret_cast<sptr_t>("draft"));
+        detached=w->DetachTab(untitled,BPoint(220,210));CHECK(detached && !w->FindTab(untitled));CHECK(detached->Lock());
+        CHECK(detached->Current()->path.empty() && detached->CurrentTab()->editor==draft && draft->Dirty());
+        Wait(*detached,[&]{return !detached->fSnapshot && !detached->Current()->recovering;});
+        detached->SaveTo(detached->Current()->id,root+"/detached-draft.txt");Wait(*detached,[&]{return !detached->Current()->saving;});
+        CHECK(ReadFile(root+"/detached-draft.txt").bytes=="draft");CHECK(detached->QuitRequested());detached->Quit();
+        // A mouse release during an asynchronous save is fulfilled when the
+        // callback has updated the disk stamp, without requiring another drag.
+        Open(*w,b);auto deferred=w->CurrentTab()->id;auto* saving=w->Current();
+        saving->editor->SendMessage(SCI_APPENDTEXT,1,reinterpret_cast<sptr_t>("!"));w->Save(saving);
+        CHECK(saving->saving && !w->DetachTab(deferred,BPoint(200,200)) && w->fDetachTab==deferred);
+        Wait(*w,[&]{return !w->FindTab(deferred);});detached=nullptr;
+        for(int32 i=0;i<be_app->CountWindows();++i) {
+            auto* candidate=dynamic_cast<Workspace*>(be_app->WindowAt(i));if(!candidate || candidate==w) continue;
+            if(candidate->Lock()) {
+                if(candidate->Current() && candidate->Current()->path==b) { detached=candidate;break; }
+                candidate->Unlock();
+            }
+        }
+        CHECK(detached && !detached->Current()->saving && !detached->CurrentTab()->editor->Dirty());
+        CHECK(detached->Current()->stamp==StatFile(b));CHECK(detached->QuitRequested());detached->Quit();
+        // Image views and bounded binary previews use the same move path.
+        auto binary=root+"/binary.bin";{std::ofstream out(binary,std::ios::binary);out.write("a\0b",3);}
+        Open(*w,binary);auto binaryID=w->CurrentTab()->id;auto* hex=w->CurrentTab()->editor;
+        CHECK(hex && hex->SendMessage(SCI_GETREADONLY));detached=w->DetachTab(binaryID,BPoint(210,210));CHECK(detached && detached->Lock());
+        CHECK(detached->CurrentTab()->editor==hex && hex->SendMessage(SCI_GETREADONLY));CHECK(detached->QuitRequested());detached->Quit();
+        auto image=CanonicalPath("resources/branding/kiri-icon-256.png");Open(*w,image);auto imageID=w->CurrentTab()->id;auto* imageView=w->CurrentTab()->view;
+        CHECK(!w->CurrentTab()->editor);detached=w->DetachTab(imageID,BPoint(210,210));CHECK(detached && detached->Lock());
+        CHECK(detached->CurrentTab()->view==imageView && !detached->CurrentTab()->editor);CHECK(detached->QuitRequested());detached->Quit();
+        CHECK(w->QuitRequested());w->Quit();
+    }
     static void Run(const std::string& root,const std::string& executable) {
         auto settings=root+"/settings",a=root+"/one.txt",b=root+"/two.txt",c=root+"/three.txt",e=root+"/four.txt";
         std::string lines;for(int i=0;i<400;++i) lines+="line "+std::to_string(i)+" needle\n";
@@ -215,6 +328,6 @@ int main(int argc,char** argv) {
     }
     BApplication application("application/x-vnd.Kiri-workspace-unit-tests");
     char folder[]="/tmp/kiri-workspace-XXXXXX";auto* root=mkdtemp(folder);if(!root) return 1;
-    try { kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
+    try { kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<" (test files: "<<root<<")\n";return 1; }
 }

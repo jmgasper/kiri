@@ -38,6 +38,9 @@ the VM. The smoke harness's `lprb` message reports every pane's views, paths,
 preview/dirty flags and positions, plus the active editor's text up to 8 KiB.
 `tools/vm.py right-click X Y WIDTH HEIGHT` opens native context menus; use
 `screenshot -s -w OUTPUT.png` inside Haiku to capture only the active window.
+`tools/vm.py drag X Y END_X END_Y WIDTH HEIGHT` performs a real pointer drag.
+Send `lprb` directly to the smoke application to inspect all workspace windows,
+including detached windows; each pane reports its tab-strip and panel coordinates.
 
 Stop gracefully with `bash tools/haiku.sh shutdown`. Check the live QMP handle
 before attempting to start another instance; do not infer termination from an SSH timeout.

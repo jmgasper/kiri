@@ -20,10 +20,11 @@ namespace kiri {
 class Editor;struct EditorState;class Explorer;class GitView;class TerminalPanel;class TabStrip;class RefreshButton;class SymbolBar;
 class Workspace:public BWindow {
 public:
-    explicit Workspace(const std::string& settingsDirectory={},bool restoreSession=true);
+    explicit Workspace(const std::string& settingsDirectory={},bool restoreSession=true,const std::string& sessionDirectory={});
     ~Workspace() override;
     void MessageReceived(BMessage* message) override;
     bool QuitRequested() override;
+    void WindowActivated(bool active) override;
     void OpenProject(const std::string& path);
     void OpenFile(const std::string& path,size_t line=1,size_t column=1,bool activate=true,bool preview=false,int64 pane=0,bool focusEditor=true);
 private:
@@ -76,6 +77,10 @@ private:
     void SplitPane(orientation direction);
     void CyclePane(int step);
     void RemoveEmptyPane(Pane* pane);
+    std::unique_ptr<Tab> TakeTab(Pane& pane,int index);
+    bool MoveTab(int64 tab,Pane& destination,int slot);
+    Workspace* DetachTab(int64 tab,BPoint screenPoint);
+    void TrackTabDrag(BMessage& message);
     void RefreshRepresentative(Document& document);
     size_t ViewCount(int64 document) const;
     bool CloseView(int64 id,bool remember=true,bool collapse=true);
@@ -100,6 +105,7 @@ private:
     void Save(Document* document,bool saveAs=false);
     void SaveTo(int64 id,const std::string& path);
     void ContinueSaveAll();
+    void CancelQuit();
     void ApplyTheme(int index);
     void ShowPreferences();
     void ShowFind();
@@ -138,6 +144,9 @@ private:
     std::unique_ptr<BMessageRunner> fPulse;
     std::unique_ptr<BMessageRunner> fRecoveryTimer;
     std::unique_ptr<BMessageRunner> fLanguageTimer;
+    std::unique_ptr<BMessageRunner> fDetachTimer;
+    int64 fDetachTab=0;
+    BPoint fDetachPoint;
     struct ServerEntry { std::unique_ptr<LanguageServer> client;std::string status; };
     std::map<std::string,ServerEntry> fServers;
     LanguageTools fLanguageTools;
@@ -166,6 +175,7 @@ private:
     std::set<std::string> fPendingOpen;
     std::shared_ptr<ProjectIndex> fIndex=std::make_shared<ProjectIndex>();
     std::string fProject,fGitRoot,fSettings;
+    std::string fSessionDirectory;
     int64 fGeneration=0,fNextID=1,fSavePanelID=0;
     int64 fSavePanelToken=0;
     int64 fFocusSerial=0;

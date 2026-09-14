@@ -97,7 +97,10 @@ for project-local versions, other languages, configuration and limits.
   The tree and document tabs show Haiku's native icons for source files, text,
   web pages, images, archives and other basic file types, with a generic fallback.
 - Tabs show unsaved dots and close controls. Scroll the tab strip to reveal
-  additional documents. Right-click any document or terminal tab for **Close all**
+  additional documents. Drag editor tabs to reorder them, move them to another
+  pane, or drop them outside the window to open them in a new window. The
+  insertion line shows where a tab will land; Escape cancels the drag.
+  Right-click any document or terminal tab for **Close all**
   and **Close others**; the latter keeps the tab you clicked. Unsaved documents
   keep their save prompts, and Cancel stops the remaining closes.
   Editing includes undo/redo, multiple selections, folding,
@@ -206,7 +209,8 @@ cmake --build build-host -j8
 ctest --test-dir build-host --output-on-failure
 ```
 
-The current suites pass **163 core checks** and **233 Haiku editor/file/worker checks**.
+The current suites pass **163 core checks**, **233 Haiku editor/file/worker checks**
+and **264 native workspace checks** (`make check-workspace`).
 Language checks include real Prettier and TypeScript servers: **98 checks** on
 Linux and **108 on Haiku**, where clangd C++ completion and symbols are also exercised:
 

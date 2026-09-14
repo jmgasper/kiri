@@ -26,9 +26,41 @@ branch. **View → Close Pane** closes that pane's tabs. **Close all** and **Clo
 others** in a document tab's context menu apply to its pane. Closing an empty
 pane collapses its divider; the workspace always retains one pane.
 
+## Dragging tabs
+
+Drag an editor tab by its label to change its position. The accent insertion
+line shows the destination. Hold near either end of a crowded tab strip to
+scroll through hidden tabs. A click still selects the tab; its close control
+and double-click action retain their existing behavior. Escape cancels a drag.
+
+Drop on another pane's tab strip to choose a position, or on its editor to
+append the tab. This works at any nesting depth. The dragged view keeps its
+text, undo history, selections, scroll position, folds, wrapping and zoom.
+If the destination already contains the file, the dragged view replaces that
+pane's existing view. Moving the last tab out of a pane collapses its divider.
+Moving a preview makes it permanent and never adds to the closed-tab history.
+Drops on the source editor body, sidebar, terminal or menus leave the tab in place.
+
+Release a tab outside the window and its border to move it into a new
+window. Unsaved and untitled files, images and binary previews can all be moved.
+A sole view carries its buffer and undo history into the new window. If another
+pane still displays the same file, the new window receives an independent copy
+of its current text and dirty state, with a fresh undo history. Further edits
+and saves in different windows are independent; existing external-change and
+save-conflict checks still apply. A drop during a save or recovery write waits
+for that operation to finish before moving the tab.
+
+Detached windows retain the project context and initially hide the file tree
+and terminal. Each window closes independently; **File → Quit** exits the
+application. Opening from the launcher uses
+the most recently active workspace. Detached windows keep private session and
+recovery files under `Kiri/windows/`, so they cannot overwrite the original
+window's session. An interrupted detached window is restored on the next launch;
+closing it normally removes its private session after handling unsaved changes.
+
 ## Shared documents
 
-Views of the same file share text, dirty state, undo history, saves, recovery and
+Within a window, views of the same file share text, dirty state, undo history, saves, recovery and
 language-server state. Selections, scrolling, folding, wrapping and zoom belong
 to each view. Saving from either view updates the same file and clears both dirty
 indicators when the saved text still matches. Save All saves each document once.
@@ -60,7 +92,7 @@ most recent first, during the current workspace session. It restores selection,
 scrolling, wrap, zoom and folds in the original pane, or the active pane if the
 original pane has closed. If that pane already contains the file, Kiri selects
 its existing tab. If another pane has it open, the restored view shares its
-buffer. There is always one logical document per path.
+buffer. There is always one logical document per path in each window.
 
 - Replacing a preview does not add it to the closed-tab history.
 - Cancelled closes add no history entry.
@@ -81,6 +113,6 @@ views; recovered drafts absent from the saved layout remain accessible.
 
 Native coverage lives in [WorkspaceTests.cpp](../tests/WorkspaceTests.cpp):
 `make check-workspace` exercises real Haiku windows, asynchronous loading and
-saving, shared Scintilla documents, preview reuse, reopen history, nested
-restoration and recovery. The existing editor, language and portable core suites
+saving, shared Scintilla documents, preview reuse, reopen history, tab moves,
+window detachment, nested restoration and recovery. The existing editor, language and portable core suites
 remain available through `make check check-native check-language`.

@@ -4,12 +4,16 @@
 #include <MenuItem.h>
 #include <PopUpMenu.h>
 #include <Window.h>
+#include <MessageRunner.h>
 #include <algorithm>
+#include <cmath>
 namespace kiri {
 TabStrip::TabStrip(const char* name,TabActions actions,const char* createLabel)
     :BView(name,B_WILL_DRAW|B_FULL_UPDATE_ON_RESIZE|B_FRAME_EVENTS),fActions(actions),fCreateLabel(createLabel) {
     SetExplicitMinSize(BSize(80,34));SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED,34));
 }
+TabStrip::~TabStrip() = default;
+void TabStrip::DetachedFromWindow() { EndDrag(false);BView::DetachedFromWindow(); }
 float TabStrip::Width(size_t index) const { return std::clamp(StringWidth(fTabs[index].name.c_str())+(fTabs[index].icon?74:54),100.f,260.f); }
 float TabStrip::AvailableWidth() const { return std::max(0.f,Bounds().Width()-(fActions.create?34:0)); }
 BRect TabStrip::NewButtonRect() const {
@@ -26,8 +30,23 @@ int TabStrip::HitTab(BPoint where) const {
     return -1;
 }
 void TabStrip::SetTabs(std::vector<TabLabel> tabs,int selected) {
+    bool changed=selected!=fSelected || tabs.size()!=fTabs.size();
+    if(!changed) for(size_t i=0;i<tabs.size();++i) if(tabs[i].id!=fTabs[i].id) { changed=true;break; }
     fTabs=std::move(tabs);fSelected=selected>=0 && selected<static_cast<int>(fTabs.size())?selected:-1;
-    EnsureSelectedVisible();Invalidate();
+    if(changed && !fPressedTab && fDropIndex<0) EnsureSelectedVisible();Invalidate();
+}
+int TabStrip::DropIndex(BPoint where,bool scroll) {
+    float total=0;for(size_t i=0;i<fTabs.size();++i) total+=Width(i);
+    if(scroll && Bounds().Contains(where)) {
+        float step=where.x<22?-18:where.x>AvailableWidth()-22?18:0;
+        fOffset=std::clamp(fOffset+step,0.f,std::max(0.f,total-AvailableWidth()));Invalidate();
+    }
+    float x=-fOffset;
+    for(size_t i=0;i<fTabs.size();++i) { float width=Width(i);if(where.x<x+width/2) return i;x+=width; }
+    return fTabs.size();
+}
+void TabStrip::SetDropIndex(int index) {
+    if(index==fDropIndex) return;fDropIndex=index;Invalidate();
 }
 void TabStrip::EnsureSelectedVisible() {
     float total=0;for(size_t i=0;i<fTabs.size();++i) total+=Width(i);
@@ -70,8 +89,15 @@ void TabStrip::Draw(BRect) {
         StrokeLine(center+BPoint(0,-5),center+BPoint(0,5));SetPenSize(1);
         SetHighColor(fTheme.border);StrokeLine(button.LeftBottom(),button.RightBottom());
     }
+    if(fDropIndex>=0) {
+        float at=-fOffset;for(int i=0;i<fDropIndex && i<int(fTabs.size());++i) at+=Width(i);
+        at=std::clamp(at,2.f,std::max(2.f,AvailableWidth()-2));
+        SetHighColor(fTheme.accent);FillRect(BRect(at-1,3,at+1,Bounds().bottom-3));
+        StrokeRect(Bounds().InsetByCopy(0,1));
+    }
 }
 void TabStrip::MouseDown(BPoint where) {
+    EndDrag(false);
     if(fPane) { MakeFocus();SendAction(kEditorFocus,-1); }
     int32 buttons=B_PRIMARY_MOUSE_BUTTON;Window()->CurrentMessage()->FindInt32("buttons",&buttons);
     int index=HitTab(where);
@@ -82,15 +108,49 @@ void TabStrip::MouseDown(BPoint where) {
     float x=-fOffset;
     for(int i=0;i<index;++i) x+=Width(i);
     int32 clicks=1;Window()->CurrentMessage()->FindInt32("clicks",&clicks);
-    SendAction(where.x>x+Width(index)-30?fActions.close:(fPane && clicks==2?kKeepTab:fActions.select),index);
+    if(where.x>x+Width(index)-30) { SendAction(fActions.close,index);return; }
+    if(fPane && clicks!=2) {
+        fPressedTab=fTabs[index].id;fPressPoint=where;
+        SetMouseEventMask(B_POINTER_EVENTS|B_KEYBOARD_EVENTS,B_LOCK_WINDOW_FOCUS|B_NO_POINTER_HISTORY);
+    }
+    SendAction(fPane && clicks==2?kKeepTab:fActions.select,index);
 }
 void TabStrip::MouseMoved(BPoint where,uint32 transit,const BMessage*) {
+    if(fPressedTab) {
+        if(!fDragging && std::hypot(where.x-fPressPoint.x,where.y-fPressPoint.y)>=6) {
+            float x=-fOffset;int index=-1;
+            for(size_t i=0;i<fTabs.size();++i) { if(fTabs[i].id==fPressedTab) { index=i;break; }x+=Width(i); }
+            if(index<0) { EndDrag(false);return; }
+            fDragging=true;SetToolTip("");
+            BeginRectTracking(BRect(x,0,x+Width(index)-1,Bounds().bottom).OffsetByCopy(where-fPressPoint));
+            BMessage tick(kTabDragTick);fDragTimer=std::make_unique<BMessageRunner>(BMessenger(this),&tick,50000);
+        }
+        if(fDragging) { DragUpdate(where);return; }
+    }
     if(transit==B_EXITED_VIEW) { SetToolTip("");return; }
     if(fActions.create && NewButtonRect().Contains(where)) { SetToolTip(fCreateLabel.c_str());return; }
     int index=HitTab(where);if(index<0) { SetToolTip("");return; }
     float right=-fOffset;for(int i=0;i<=index;++i) right+=Width(i);
     std::string tip=where.x>right-30?"Close "+fTabs[index].name:fTabs[index].tooltip;
     SetToolTip(tip.c_str());
+}
+void TabStrip::DragUpdate(BPoint where) {
+    BMessage message(kTabDragUpdate);message.AddInt64("tab_id",fPressedTab);message.AddPoint("screen_point",ConvertToScreen(where));
+    Window()->PostMessage(&message);
+}
+void TabStrip::EndDrag(bool drop,BPoint where) {
+    fDragTimer.reset();
+    if(fDragging) {
+        EndRectTracking();BMessage message(drop?kTabDragEnd:kTabDragCancel);
+        message.AddInt64("tab_id",fPressedTab);message.AddPoint("screen_point",ConvertToScreen(where));
+        Window()->PostMessage(&message);
+    }
+    fDragging=false;fPressedTab=0;
+}
+void TabStrip::MouseUp(BPoint where) { EndDrag(true,where); }
+void TabStrip::KeyDown(const char* bytes,int32 count) {
+    if(fPressedTab && count && bytes[0]==B_ESCAPE) EndDrag(false);
+    else if(!fPressedTab) BView::KeyDown(bytes,count);
 }
 void TabStrip::SendAction(uint32 command,int index) {
     if(!command || !Window()) return;
@@ -116,7 +176,9 @@ void TabStrip::ContextMenu(BPoint where,int index) {
     menu.SetTargetForItems(Window());menu.Go(ConvertToScreen(where),true,true);
 }
 void TabStrip::MessageReceived(BMessage* message) {
-    if(message->what==B_MOUSE_WHEEL_CHANGED) {
+    if(message->what==kTabDragTick) {
+        if(fDragging) { BPoint where;uint32 buttons=0;GetMouse(&where,&buttons,false);if(buttons&B_PRIMARY_MOUSE_BUTTON) DragUpdate(where); }
+    } else if(message->what==B_MOUSE_WHEEL_CHANGED) {
         float dy=0,dx=0;message->FindFloat("be:wheel_delta_y",&dy);message->FindFloat("be:wheel_delta_x",&dx);
         float total=0;for(size_t i=0;i<fTabs.size();++i) total+=Width(i);
         fOffset=std::clamp(fOffset+(dy+dx)*50,0.f,std::max(0.f,total-AvailableWidth()));Invalidate();
