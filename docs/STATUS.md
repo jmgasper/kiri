@@ -1,4 +1,25 @@
-# Beta 6 verification record
+# Verification record
+
+## 0.0.1 alpha public release
+
+The first public release uses version `0.0.1-alpha` and Haiku package version
+`0.0.1~alpha-1`. Earlier beta labels below refer to local development builds.
+The release is built from a clean source copy on Haiku R1/beta5 x86_64, with
+matching CMake, native application and language-server client versions.
+
+Fresh builds passed **163 core checks on Linux and Haiku**, **233 native
+editor/file/worker checks**, and **98 language checks on Linux / 108 on Haiku**.
+The language checks exercised real Prettier and TypeScript servers, plus clangd
+on Haiku. CMake's two Linux test suites also passed. An isolated instance showed
+the launcher and accepted a real folder reference, opening `KiriDemo`.
+
+The native resource reports `0 0 1 a 0` (0.0.1 alpha), and the release package
+uses the corresponding version in its filename, metadata and provided packages.
+Packaging verifies both executable and MIME icon attributes against the HVIF
+source. Release assets include the HPKG, stripped and debug executables, a source
+archive from the release tag, and SHA-256 checksums.
+
+## Development build history
 
 Verified September 14, 2026 on Haiku R1/beta5 x86_64, hrev57937+113, in
 QEMU/KVM with 4 vCPUs and 4 GiB RAM. Native build: GCC 13.3, Scintilla 5.3.4,

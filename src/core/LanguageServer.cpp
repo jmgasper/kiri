@@ -204,7 +204,7 @@ LanguageServer::LanguageServer(std::vector<std::string> command,const std::strin
             {"documentSymbol",{{"dynamicRegistration",false},{"hierarchicalDocumentSymbolSupport",true},{"symbolKind",{{"valueSet",Json::array({1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26})}}}}}
         }}
     };
-    Json params={{"processId",getpid()},{"clientInfo",{{"name","Kiri"},{"version","0.1.0"}}},{"rootUri",FileURI(root)},
+    Json params={{"processId",getpid()},{"clientInfo",{{"name","Kiri"},{"version","0.0.1-alpha"}}},{"rootUri",FileURI(root)},
         {"workspaceFolders",Json::array({{{"uri",FileURI(root)},{"name",root}}})},{"capabilities",capabilities},
         {"initializationOptions",std::move(initializationOptions)}};
     fProcess->Request("initialize",params,[this](RpcReply reply) {

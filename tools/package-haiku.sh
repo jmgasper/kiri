@@ -2,6 +2,10 @@
 set -euo pipefail
 KIRI_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$KIRI_ROOT"
+KIRI_PACKAGE_NAME=$(awk '$1 == "name" { print $2; exit }' resources/Kiri.PackageInfo)
+KIRI_PACKAGE_VERSION=$(awk '$1 == "version" { print $2; exit }' resources/Kiri.PackageInfo)
+KIRI_PACKAGE_ARCH=$(awk '$1 == "architecture" { print $2; exit }' resources/Kiri.PackageInfo)
+KIRI_PACKAGE_FILE="$KIRI_ROOT/artifacts/$KIRI_PACKAGE_NAME-$KIRI_PACKAGE_VERSION-$KIRI_PACKAGE_ARCH.hpkg"
 make -j4
 KIRI_STAGE=$(mktemp -d /tmp/kiri-package-XXXXXX)
 trap 'rm -rf -- "$KIRI_STAGE"' EXIT
@@ -34,5 +38,5 @@ cmp resources/branding/kiri-icon.hvif "$KIRI_STAGE/.icon-check"
 catattr -r META:ICON "$KIRI_STAGE/data/mime_db/application/x-vnd.kiri-editor" > "$KIRI_STAGE/.icon-check"
 cmp resources/branding/kiri-icon.hvif "$KIRI_STAGE/.icon-check"
 rm "$KIRI_STAGE/.icon-check"
-package create -C "$KIRI_STAGE" "$KIRI_ROOT/artifacts/kiri-0.1.0~beta6-7-x86_64.hpkg"
-printf '%s\n' "$KIRI_ROOT/artifacts/kiri-0.1.0~beta6-7-x86_64.hpkg"
+package create -C "$KIRI_STAGE" "$KIRI_PACKAGE_FILE"
+printf '%s\n' "$KIRI_PACKAGE_FILE"

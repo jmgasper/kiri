@@ -5,11 +5,11 @@ resource vector_icon {
 };
 resource app_version {
     major = 0,
-    middle = 1,
-    minor = 0,
-    variety = B_APPV_BETA,
-    internal = 6,
-    short_info = "Kiri — native code editor",
+    middle = 0,
+    minor = 1,
+    variety = B_APPV_ALPHA,
+    internal = 0,
+    short_info = "Kiri 0.0.1 alpha — native code editor",
     long_info = "A fast, native project editor for Haiku with Git and an embedded terminal."
 };
 resource file_types message {

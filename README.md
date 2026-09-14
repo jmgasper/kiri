@@ -4,7 +4,7 @@ A native C++ project editor for Haiku, with a file tree, source editing, an
 embedded terminal and a Git workspace. Kiri uses Haiku's Interface Kit,
 Scintilla, Lexilla and libvterm. There is no browser or web UI runtime.
 
-**0.1.0 beta 6** builds and runs on Haiku R1/beta5 x86_64. The application has
+**0.0.1 alpha** is the first public release and runs on Haiku R1/beta5 x86_64. The application has
 been exercised in QEMU/KVM, including real editing, staging and committing,
 crash recovery, image previews and a 200 MiB document. See the
 [verification record](docs/STATUS.md) and [performance measurements](docs/PERFORMANCE.md).
@@ -13,10 +13,12 @@ crash recovery, image previews and a 200 MiB document. See the
 
 ## Install or build
 
-Install the package from `artifacts/` on Haiku:
+Download the Haiku x86_64 package from the
+[0.0.1 alpha release](https://github.com/jmgasper/kiri/releases/tag/v0.0.1-alpha),
+then install it on Haiku:
 
 ```sh
-pkgman install ./artifacts/kiri-0.1.0~beta6-7-x86_64.hpkg
+pkgman install ./kiri-0.0.1~alpha-1-x86_64.hpkg
 /boot/system/apps/Kiri
 ```
 
@@ -174,7 +176,7 @@ details and reproduction commands in [PERFORMANCE.md](docs/PERFORMANCE.md).
 - The tree loads directories individually. A single directory with an extreme
   number of direct children and very long text lines need further measurement.
 - Terminal selection covers whole rows. PDF/video viewers, text-encoding
-  conversion, debugging and an extension system are outside this beta.
+  conversion, debugging and an extension system are outside this alpha.
 - Git remote authentication uses existing credentials; there is no login dialog
   or interactive merge-conflict editor.
 

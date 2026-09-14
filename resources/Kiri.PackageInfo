@@ -1,15 +1,17 @@
 name kiri
-version 0.1.0~beta6-7
+version 0.0.1~alpha-1
 architecture x86_64
 summary "A native project editor with Git and an embedded terminal"
 description "Kiri is a native C++ workspace for source files, images and large projects. It includes Prettier formatting, language-server completion and file symbols, a launcher for recent folders and files, editor preferences, ten themes, syntax highlighting, native file icons, Git history and diffs, commits, GitHub line permalinks, project search and tabbed PTY terminals."
 packager "Kiri contributors"
 vendor "Kiri"
+urls { "https://github.com/jmgasper/kiri" }
+source-urls { "https://github.com/jmgasper/kiri/archive/refs/tags/v0.0.1-alpha.tar.gz" }
 copyrights { "2026 Kiri contributors" "2008 Paul Evans <leonerd@leonerd.org.uk>" "2013-2025 Niels Lohmann" }
 licenses { "MIT" }
 provides {
-    kiri = 0.1.0~beta6
-    app:Kiri = 0.1.0~beta6
+    kiri = 0.0.1~alpha
+    app:Kiri = 0.0.1~alpha
 }
 requires {
     haiku >= r1~beta5
