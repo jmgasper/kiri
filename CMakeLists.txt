@@ -62,7 +62,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
     find_program(RC_EXECUTABLE rc REQUIRED)
     find_program(XRES_EXECUTABLE xres REQUIRED)
     find_program(MIMESET_EXECUTABLE mimeset REQUIRED)
-    set_property(TARGET Kiri APPEND PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/resources/Kiri.rdef)
+    set_property(TARGET Kiri APPEND PROPERTY LINK_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/resources/Kiri.rdef
+        ${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/kiri-icon.hvif)
     add_custom_command(TARGET Kiri POST_BUILD
         COMMAND ${RC_EXECUTABLE} -o ${CMAKE_CURRENT_BINARY_DIR}/Kiri.rsrc ${CMAKE_CURRENT_SOURCE_DIR}/resources/Kiri.rdef
         COMMAND ${XRES_EXECUTABLE} -o $<TARGET_FILE:Kiri> ${CMAKE_CURRENT_BINARY_DIR}/Kiri.rsrc

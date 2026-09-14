@@ -4,6 +4,31 @@ Verified September 14, 2026 on Haiku R1/beta5 x86_64, hrev57937+113, in
 QEMU/KVM with 4 vCPUs and 4 GiB RAM. Native build: GCC 13.3, Scintilla 5.3.4,
 Lexilla 5.4.6. Portable core also built and tested with Linux GCC 13.3.
 
+## Native application icon (package revision 7)
+
+The approved blue and mint folded-paper logo now has a native HVIF icon,
+with editable SVG and Icon-O-Matic sources. The 1,512-byte vector was exported
+by Haiku's Icon-O-Matic and rendered through `BIconUtils` at 16, 32, 64 and
+256 pixels. Light and dark previews were inspected; all four renders contained
+visible artwork without opaque pixels clipped at the canvas edges.
+
+The revision 7 package was built and installed on Haiku. Its embedded `VICN`
+resource, executable `BEOS:ICON` attribute and both the system and user MIME
+database `META:ICON` attributes matched the source HVIF byte for byte. Native
+Tracker icon lookups at 16 and 32 pixels matched direct HVIF renders pixel for
+pixel. [Tracker's Applications window](screenshots/app-icon.png) also displayed
+the installed icon alongside the system applications. Packaging forces a complete
+staged MIME record even when Kiri is already registered in the build machine's
+fallback database. It verifies the executable and MIME icon attributes against
+the source before creating the package; rebuilding with the icon already
+installed also passed these checks.
+
+Makefile linking, package creation, shell syntax and host CMake configuration
+passed. Compiling the resource from a different working directory also passed,
+covering the absolute resource path used by CMake. Both build systems track
+the external HVIF dependency. This revision changes branding and packaging;
+the runtime test results below are the existing beta 6 baseline.
+
 ## Automated checks
 
 Beta 6 rebuilt the native application and reran the portable and expanded native

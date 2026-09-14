@@ -16,7 +16,7 @@ crash recovery, image previews and a 200 MiB document. See the
 Install the package from `artifacts/` on Haiku:
 
 ```sh
-pkgman install ./artifacts/kiri-0.1.0~beta6-4-x86_64.hpkg
+pkgman install ./artifacts/kiri-0.1.0~beta6-7-x86_64.hpkg
 /boot/system/apps/Kiri
 ```
 

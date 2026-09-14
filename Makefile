@@ -16,7 +16,7 @@ VTERM_OBJ = $(VTERM:%.c=$(BUILD)/%.o)
 LIBS = -lbe -ltracker -ltranslation -lscintilla -llexilla
 .PHONY: all check check-native check-language workspace-smoke launcher-smoke package clean
 all: $(BUILD)/Kiri
-$(BUILD)/Kiri: $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) resources/Kiri.rdef
+$(BUILD)/Kiri: $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) resources/Kiri.rdef resources/branding/kiri-icon.hvif
 	$(CXX) -o $@.new $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) $(LIBS)
 	rc -o $(BUILD)/Kiri.rsrc resources/Kiri.rdef
 	xres -o $@.new $(BUILD)/Kiri.rsrc

@@ -11,7 +11,7 @@ mkdir -p "$KIRI_STAGE/apps" "$KIRI_STAGE/documentation/packages/kiri/vendor/libv
 cp build-haiku/Kiri "$KIRI_STAGE/apps/Kiri"
 strip --strip-debug "$KIRI_STAGE/apps/Kiri"
 # GNU strip removes the appended Haiku resources; restore the application
-# signature, supported types and version on the release executable.
+# signature, icon, supported types and version on the release executable.
 xres -o "$KIRI_STAGE/apps/Kiri" build-haiku/Kiri.rsrc
 cp resources/Kiri.PackageInfo "$KIRI_STAGE/.PackageInfo"
 cp README.md LICENSE "$KIRI_STAGE/documentation/packages/kiri/"
@@ -25,7 +25,14 @@ ln -s ../../../../apps/Kiri "$KIRI_STAGE/data/deskbar/menu/Applications/Kiri"
 # Generate both in the package, as HaikuPorter does, without changing the host DB.
 (
     cd "$KIRI_STAGE"
-    mimeset --all --mimedb data/mime_db --mimedb /boot/system/data/mime_db apps/Kiri
+    # Force a complete staged record even when the fallback DB already has Kiri.
+    mimeset --all -f --mimedb data/mime_db --mimedb /boot/system/data/mime_db apps/Kiri
 )
-package create -C "$KIRI_STAGE" "$KIRI_ROOT/artifacts/kiri-0.1.0~beta6-4-x86_64.hpkg"
-printf '%s\n' "$KIRI_ROOT/artifacts/kiri-0.1.0~beta6-4-x86_64.hpkg"
+# Refuse a package with a missing or stale application/MIME icon.
+catattr -r BEOS:ICON "$KIRI_STAGE/apps/Kiri" > "$KIRI_STAGE/.icon-check"
+cmp resources/branding/kiri-icon.hvif "$KIRI_STAGE/.icon-check"
+catattr -r META:ICON "$KIRI_STAGE/data/mime_db/application/x-vnd.kiri-editor" > "$KIRI_STAGE/.icon-check"
+cmp resources/branding/kiri-icon.hvif "$KIRI_STAGE/.icon-check"
+rm "$KIRI_STAGE/.icon-check"
+package create -C "$KIRI_STAGE" "$KIRI_ROOT/artifacts/kiri-0.1.0~beta6-7-x86_64.hpkg"
+printf '%s\n' "$KIRI_ROOT/artifacts/kiri-0.1.0~beta6-7-x86_64.hpkg"

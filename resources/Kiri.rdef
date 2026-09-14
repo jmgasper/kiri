@@ -1,5 +1,8 @@
 resource app_signature "application/x-vnd.Kiri-editor";
 resource app_flags B_SINGLE_LAUNCH;
+resource vector_icon {
+    import "branding/kiri-icon.hvif"
+};
 resource app_version {
     major = 0,
     middle = 1,
