@@ -18,7 +18,7 @@ Download the Haiku x86_64 package from the
 then install it on Haiku:
 
 ```sh
-pkgman install ./kiri-0.0.1~alpha-1-x86_64.hpkg
+pkgman install ./kiri-0.0.1.alpha-1-x86_64.hpkg
 /boot/system/apps/Kiri
 ```
 

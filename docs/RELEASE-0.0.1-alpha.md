@@ -5,11 +5,11 @@ source editing, Git and tabbed terminals.
 
 ## Install
 
-Download `kiri-0.0.1~alpha-1-x86_64.hpkg` from the release assets and run on
+Download `kiri-0.0.1.alpha-1-x86_64.hpkg` from the release assets and run on
 Haiku R1/beta5 x86_64:
 
 ```sh
-pkgman install ./kiri-0.0.1~alpha-1-x86_64.hpkg
+pkgman install ./kiri-0.0.1.alpha-1-x86_64.hpkg
 /boot/system/apps/Kiri
 ```
 
