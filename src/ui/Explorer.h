@@ -31,7 +31,7 @@ public:
     void CheckExpanded();
     std::function<void(std::string)> requestDirectory;
 private:
-    void OpenSelected();
+    void OpenSelected(bool preview=false);
     void AddEntries(const DirectoryResult& listing,FileItem* parent);
     Theme fTheme=Theme::Builtins()[0];
 };

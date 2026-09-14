@@ -85,11 +85,12 @@ private:BTextControl* fText;BMessenger fTarget;uint32 fCommand;
 };
 class SearchWindow:public BWindow {
 public:
-    SearchWindow(BWindow* owner,std::string root,std::shared_ptr<ProjectIndex> index,bool search,const Theme& theme)
+    SearchWindow(BWindow* owner,std::string root,std::shared_ptr<ProjectIndex> index,bool search,const Theme& theme,bool preview)
         :BWindow(BRect(0,0,700,420),search?"Search Project":"Open Quickly",B_TITLED_WINDOW_LOOK,B_FLOATING_APP_WINDOW_FEEL,B_AUTO_UPDATE_SIZE_LIMITS),
         fTarget(owner),fRoot(std::move(root)),fIndex(std::move(index)),fSearch(search),fTheme(theme) {
         fQuery=new BTextControl("query","", "",new BMessage(kQueryResult));fQuery->SetModificationMessage(new BMessage(kQueryChanged));
         fResults=new BListView("results");fResults->SetInvocationMessage(new BMessage(kQueryResult));
+        if(preview) fResults->SetSelectionMessage(new BMessage(kQueryPreview));
         fResults->SetExplicitMinSize(BSize(480,240));fQuery->TextView()->AddFilter(new SearchNavigation(fResults));
         fStatus=new BStringView("search status",search?"Search text in project files":"Type part of a file path");
         auto* panel=new BView("search panel",B_WILL_DRAW);
@@ -106,11 +107,11 @@ public:
             fJobs->Cancel("query");
             ++fGeneration;BMessage request(kProjectSearch);fTimer=std::make_unique<BMessageRunner>(BMessenger(this),&request,120000,1);
         } else if(message->what==kProjectSearch) Query();
-        else if(message->what==kQueryResult) {
+        else if(message->what==kQueryResult || message->what==kQueryPreview) {
             int32 selected=fResults->CurrentSelection();if(selected<0 && !fMatches.empty()) selected=0;
             if(selected>=0 && selected<static_cast<int32>(fMatches.size())) {
                 auto& match=fMatches[selected];BMessage request(kOpenFile);request.AddString("path",(fs::path(fRoot)/match.path).c_str());
-                request.AddInt64("line",match.line);request.AddInt64("column",match.column);fTarget.SendMessage(&request);PostMessage(B_QUIT_REQUESTED);
+                request.AddInt64("line",match.line);request.AddInt64("column",match.column);request.AddBool("preview",message->what==kQueryPreview);fTarget.SendMessage(&request);if(message->what==kQueryResult) PostMessage(B_QUIT_REQUESTED);
             }
         } else BWindow::MessageReceived(message);
     }
@@ -163,16 +164,10 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession):B
     BLayoutBuilder::Group<>(sidebar,B_VERTICAL,6).SetInsets(0,8,0,0)
         .AddGroup(B_HORIZONTAL,6).SetInsets(12,0,12,0).Add(new BStringView("files title","FILES"),0).Add(fRefresh,0).AddGlue().End()
         .Add(new BScrollView("explorer scroll",fExplorer,0,false,true,B_NO_BORDER));
-    fTabs=new TabStrip();
-    auto* documentHost=new BView("document host",0);fDocumentsLayout=new BCardLayout();documentHost->SetLayout(fDocumentsLayout);
-    auto* welcome=new BView("welcome",B_WILL_DRAW);
-    auto* title=new BStringView("welcome title","Kiri");BFont large(be_bold_font);large.SetSize(32);title->SetFont(&large);
-    BLayoutBuilder::Group<>(welcome,B_VERTICAL,12).SetInsets(40).AddGlue().Add(title)
-        .Add(new BStringView("welcome detail","A native workspace for your code."))
-        .Add(new BStringView("welcome help","Open a folder to explore files, review Git history, and work in the terminal."))
-        .Add(new BStringView("welcome keys","Alt O  Open File     Alt P  Open Quickly     Alt F  Find     Alt G  Go to Line"))
-        .AddGlue();
-    fDocumentsLayout->AddView(welcome);
+    fLayout=std::make_unique<LayoutNode>();fLayout->pane=CreatePane();
+    fActivePane=fLayout->pane;
+    fPaneHost=new BView("editor panes",0);
+    BLayoutBuilder::Group<>(fPaneHost,B_VERTICAL,0).Add(fLayout->View());
     fFindBar=new BView("find bar",0);fFindText=new BTextControl("find text","Find","",new BMessage(kFindNext));
     fReplaceText=new BTextControl("replace text","Replace","",new BMessage(kReplace));fMatchCase=new BCheckBox("case","Aa",nullptr);
     BLayoutBuilder::Group<>(fFindBar,B_HORIZONTAL,5).SetInsets(8,5,8,5).Add(fFindText).Add(fReplaceText).Add(fMatchCase)
@@ -180,7 +175,7 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession):B
         .Add(new BButton("replace all","All",new BMessage(kReplaceAll))).Add(new BButton("hide find","×",new BMessage(kFind)));
     auto* editorPanel=new BView("editor panel",0);
     fSymbolBar=new SymbolBar();
-    BLayoutBuilder::Group<>(editorPanel,B_VERTICAL,0).Add(fTabs).Add(fSymbolBar).Add(fFindBar).Add(documentHost);
+    BLayoutBuilder::Group<>(editorPanel,B_VERTICAL,0).Add(fSymbolBar).Add(fFindBar).Add(fPaneHost);
     fFindBar->Hide();
     fGit=new GitView();auto* modes=new BView("workspace modes",0);fModeLayout=new BCardLayout();modes->SetLayout(fModeLayout);fModeLayout->AddView(editorPanel);fModeLayout->AddView(fGit);
     fTerminal=new TerminalPanel();
@@ -195,6 +190,7 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession):B
     for(int32 i=0;i<CountChildren();++i) ThemeView(ChildAt(i),Theme::Builtins()[0]);
     ResizeTo(1195,685);
     RestoreSettings(restoreSession);ApplyTheme(fEditorSettings.theme);
+    menu->FindItem(kPreviewTabs)->SetMarked(fPreviewTabs);
     BMessage pulse(kPulse);fPulse=std::make_unique<BMessageRunner>(BMessenger(this),&pulse,2000000);
     BMessage languages(kLanguageTick);fLanguageTimer=std::make_unique<BMessageRunner>(BMessenger(this),&languages,150000);
     if(fTerminal->Empty()) NewTerminal(false);
@@ -210,16 +206,19 @@ BMenuBar* Workspace::BuildMenus() {
     auto* bar=new BMenuBar("menu");
     auto add=[](BMenu* menu,const char* title,uint32 what,char key=0,uint32 modifiers=0) {
         auto* message=new BMessage(what);
-        if(what==kCloseTab || what==kCloseTerminal || what==kToggleTerminal) message->AddBool("current_tab",true);
+        if(what==kCloseTab || what==kCloseTerminal || what==kToggleTerminal || what==kKeepTab) message->AddBool("current_tab",true);
         if(what==kOpenFile) message->AddBool("file_picker",true);
         menu->AddItem(new BMenuItem(title,message,key,modifiers));
     };
     auto* file=new BMenu("File");add(file,"New File",kNewFile,'N');add(file,"Open File…",kOpenFile,'O');add(file,"Open Folder…",kOpenProject,'O',B_SHIFT_KEY);add(file,"Show Launcher…",kShowLauncher);file->AddSeparatorItem();
-    add(file,"Save",kSave,'S');add(file,"Save As…",kSaveAs,'S',B_SHIFT_KEY);add(file,"Save All",kSaveAll);add(file,"Close Tab",kCloseTab,'W');file->AddSeparatorItem();add(file,"Quit",B_QUIT_REQUESTED,'Q');bar->AddItem(file);
+    add(file,"Save",kSave,'S');add(file,"Save As…",kSaveAs,'S',B_SHIFT_KEY);add(file,"Save All",kSaveAll);add(file,"Close Tab",kCloseTab,'W');add(file,"Keep Open",kKeepTab,'K');add(file,"Reopen Closed Tab",kReopenTab,'W',B_SHIFT_KEY);file->AddSeparatorItem();add(file,"Quit",B_QUIT_REQUESTED,'Q');bar->AddItem(file);
     auto* edit=new BMenu("Edit");add(edit,"Undo",B_UNDO,'Z');add(edit,"Redo",B_REDO,'Z',B_SHIFT_KEY);edit->AddSeparatorItem();add(edit,"Cut",B_CUT,'X');add(edit,"Copy",B_COPY,'C');add(edit,"Paste",B_PASTE,'V');add(edit,"Select All",B_SELECT_ALL,'A');edit->AddSeparatorItem();
     add(edit,"Format with Prettier",kFormatPrettier);add(edit,"Complete Code",kComplete);add(edit,"Language Tools…",kShowLanguageTools);
     edit->AddSeparatorItem();add(edit,"Preferences…",kShowPreferences,',');bar->AddItem(edit);
     auto* view=new BMenu("View");add(view,"Show / Hide Files",kToggleSidebar,'B');add(view,"Show / Hide Terminal",kToggleTerminal,'`');add(view,"Source Control",kToggleGit,'G',B_SHIFT_KEY);view->AddSeparatorItem();
+    add(view,"Split Right",kSplitRight,'\\');add(view,"Split Down",kSplitDown,'\\',B_SHIFT_KEY);
+    add(view,"Focus Next Pane",kNextPane,']',B_CONTROL_KEY);add(view,"Focus Previous Pane",kPreviousPane,'[',B_CONTROL_KEY);add(view,"Close Pane",kClosePane);
+    add(view,"Preview Tabs",kPreviewTabs);view->FindItem(kPreviewTabs)->SetMarked(fPreviewTabs);view->AddSeparatorItem();
     fThemes=ThemeMenu("Color Theme",kTheme,0);fThemes->SetLabelFromMarked(false);
     view->AddItem(fThemes);add(view,"Zoom In",kZoomIn,'+');add(view,"Zoom Out",kZoomOut,'-');add(view,"Word Wrap",kWrap);add(view,"Show Whitespace",kShowWhitespace);bar->AddItem(view);
     auto* search=new BMenu("Search");add(search,"Find / Replace",kFind,'F');add(search,"Find Next",kFindNext);add(search,"Find Previous",kFindPrevious);add(search,"Open Quickly…",kQuickOpen,'P');add(search,"Search Project…",kProjectSearch,'F',B_SHIFT_KEY);add(search,"Go to Line…",kGoToLine,'G');add(search,"Go to Symbol…",kBrowseSymbols,'R',B_SHIFT_KEY);bar->AddItem(search);
@@ -227,14 +226,8 @@ BMenuBar* Workspace::BuildMenus() {
     auto* term=new BMenu("Terminal");add(term,"New Terminal",kNewTerminal,'T',B_SHIFT_KEY);add(term,"Close Terminal",kCloseTerminal);term->AddSeparatorItem();add(term,"Show / Hide",kToggleTerminal);bar->AddItem(term);
     return bar;
 }
-Workspace::Document* Workspace::Current() { return fSelected>=0 && fSelected<static_cast<int>(fDocuments.size())?fDocuments[fSelected].get():nullptr; }
 Workspace::Document* Workspace::ByID(int64 id) { for(auto& document:fDocuments) if(document->id==id) return document.get();return nullptr; }
 void Workspace::Notice(const std::string& text) { fStatus->SetText(text.c_str());fStatus->SetToolTip(text.c_str()); }
-void Workspace::UpdateTabs() {
-    std::vector<TabLabel> labels;
-    for(auto& d:fDocuments) labels.push_back({d->name+(d->external?" !":""),d->path,d->editor && d->editor->Dirty(),d->id,FileIcon(d->path.empty()?d->name:d->path)});
-    fTabs->SetTabs(std::move(labels),fSelected);UpdateStatus();
-}
 void Workspace::UpdateStatus() {
     auto* d=Current();
     if(!d) { Notice(fProject.empty()?"Open a folder to begin":fProject+" · "+std::to_string(fIndex->paths.size())+" indexed files");return; }
@@ -249,16 +242,10 @@ void Workspace::UpdateStatus() {
     }
     Notice(status);
 }
-void Workspace::SelectTab(int index) {
-    if(index<0 || index>=static_cast<int>(fDocuments.size())) return;
-    CancelCompletion();++fFocusSerial;
-    fSelected=index;fModeLayout->SetVisibleItem(int32(0));fDocumentsLayout->SetVisibleItem(index+1);
-    if(fDocuments[index]->editor) fDocuments[index]->editor->MakeFocus();UpdateTabs();UpdateSymbolBar();
-}
 void Workspace::NewFile() {
     auto document=std::make_unique<Document>();document->id=fNextID++;document->name="Untitled "+std::to_string(document->id);
     document->editor=new Editor();document->editor->SetText("");document->editor->ApplySettings(fEditorSettings);document->view=document->editor;
-    fDocumentsLayout->AddView(document->view);fDocuments.push_back(std::move(document));SelectTab(fDocuments.size()-1);
+    int index=AddTab(*fActivePane,*document,false,true);fDocuments.push_back(std::move(document));SelectTab(index);SaveSettings();
 }
 void Workspace::NewTerminal(bool focus) {
     if(focus) ++fFocusSerial;
@@ -314,73 +301,93 @@ void Workspace::RefreshIndex() {
         return [this,index,generation] { if(generation==fGeneration) fIndex=index; };
     },"index refresh");
 }
-void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool activate) {
-    auto path=CanonicalPath(input);
+void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool activate,bool preview,int64 paneID,bool focusEditor) {
+    auto path=CanonicalPath(input);auto* pane=paneID?FindPane(paneID):fActivePane;if(!pane) return;paneID=pane->id;
     if(fRestoring && fRestoringDrafts) { if(std::find(fRestorePaths.begin(),fRestorePaths.end(),path)==fRestorePaths.end()) fRestorePaths.push_back(path);return; }
-    for(size_t i=0;i<fDocuments.size();++i) if(fDocuments[i]->path==path) {
+    preview=preview && fPreviewTabs;PromotePreviews();
+    auto paneSerial=++pane->openSerial;auto focus=activate?++fFocusSerial:0;
+    int64 reloadID=0,reloadRevision=0;
+    for(auto& document:fDocuments) if(document->path==path) {
+        auto* d=document.get();
         if(activate) RememberRecent(path,false);
-        auto* d=fDocuments[i].get();
-        if(d->external && d->editor) {
-            int32 choice=(new BAlert("Reload File","This file changed on disk. Reloading will replace the contents in this tab.","Cancel","Reload",nullptr,B_WIDTH_AS_USUAL,B_WARNING_ALERT))->Go();
-            if(choice==1) { d->editor->MarkSaved();CloseTab(i);break; }
+        if(activate && !preview && d->external && d->editor) {
+            int32 choice=(new BAlert("Reload File","This file changed on disk. Reloading replaces its contents in every pane and clears its undo history.","Cancel","Reload",nullptr,B_WIDTH_AS_USUAL,B_WARNING_ALERT))->Go();
+            if(choice!=1) return;reloadID=d->id;reloadRevision=d->editor->InputRevision();break;
         }
-        if(activate) { SelectTab(i);if(d->editor) d->editor->GoTo(line,column); }return;
+        ShowDocument(*pane,*d,line,column,preview,activate,focusEditor);SaveSettings();return;
     }
-    if(fPendingOpen.count(path)) return;fPendingOpen.insert(path);Notice("Opening "+path+"…");
-    auto focus=activate?++fFocusSerial:0,originalID=Current()?Current()->id:0,originalRevision=Current() && Current()->editor?Current()->editor->Revision():0;
+    if(fPendingOpen.count(path)) {
+        fPendingRequests[path].push_back([this,path,line,column,activate,preview,paneID,focusEditor,paneSerial] {
+            auto* pane=FindPane(paneID);if(pane && (!preview || pane->openSerial==paneSerial)) OpenFile(path,line,column,activate,preview,paneID,focusEditor);
+        });return;
+    }
+    fPendingOpen.insert(path);Notice("Opening "+path+"…");
+    auto* original=Current();auto originalID=original?original->id:0,originalRevision=original && original->editor?original->editor->InputRevision():0;
     auto loader=fLoaderFactory->CreateLoader(StatFile(path).size>8*1024*1024);
-    fJobs->Submit([this,path,line,column,loader,activate,focus,originalID,originalRevision](const auto& cancel) {
-        struct Loaded { FileData data;std::unique_ptr<BBitmap> image; };
+    fJobs->Submit([this,path,line,column,loader,activate,preview,paneID,paneSerial,focusEditor,focus,originalID,originalRevision,reloadID,reloadRevision](const auto& cancel) {
+        struct Loaded { FileData data;std::shared_ptr<BBitmap> image; };
         auto loaded=std::make_shared<Loaded>();
         std::string extension=fs::path(path).extension().string();for(auto& c:extension) c=std::tolower(static_cast<unsigned char>(c));
         const std::set<std::string> imageTypes={".png",".jpg",".jpeg",".gif",".bmp",".webp",".tga",".ico",".tif",".tiff",".icns"};
-        if(imageTypes.count(extension)) {
-            loaded->image.reset(BTranslationUtils::GetBitmap(path.c_str()));loaded->data.stamp=StatFile(path);
-        }
+        if(imageTypes.count(extension)) { loaded->image.reset(BTranslationUtils::GetBitmap(path.c_str()));loaded->data.stamp=StatFile(path); }
         if(!loaded->image) {
             if(!loader->loader) loaded->data.error="Not enough memory to open this document.";
             else loaded->data=ReadFile(path,&cancel,1024ULL*1024*1024,[&](std::string_view chunk){return loader->loader->AddData(chunk.data(),chunk.size())==SC_STATUS_OK;});
         }
-        return [this,path,line,column,loaded,loader,activate,focus,originalID,originalRevision] {
+        return [this,path,line,column,loaded,loader,activate,preview,paneID,paneSerial,focusEditor,focus,originalID,originalRevision,reloadID,reloadRevision] {
             fPendingOpen.erase(path);
-            if(!loaded->data.ok()) { Notice(loaded->data.error);(new BAlert("Open File",loaded->data.error.c_str(),"OK"))->Go();FinishRestore();return; }
+            auto requests=std::move(fPendingRequests[path]);fPendingRequests.erase(path);
+            auto finish=[&] { for(auto& request:requests) request();FinishRestore();SaveSettings(); };
+            auto* pane=FindPane(paneID);
+            if(!loaded->data.ok()) {
+                Notice(loaded->data.error);if(!preview) (new BAlert("Open File",loaded->data.error.c_str(),"OK"))->Go();FinishRestore();return;
+            }
+            if(!pane || (preview && pane->openSerial!=paneSerial)) { finish();return; }
             auto d=std::make_unique<Document>();d->id=fNextID++;d->path=path;d->name=fs::path(path).filename().string();d->stamp=loaded->data.stamp;
             if(loaded->image) {
-                d->view=new PreviewView(std::move(loaded->image),d->name,d->stamp.size);
+                d->view=new PreviewView(loaded->image,d->name,d->stamp.size);
                 static_cast<PreviewView*>(d->view)->ApplyTheme(Theme::Builtins()[fEditorSettings.theme]);
             } else {
-                d->editor=new Editor();d->view=d->editor;
-                bool binary=loaded->data.binary || !loaded->data.utf8;
-                d->bom=loaded->data.bom;
+                d->editor=new Editor();d->view=d->editor;bool binary=loaded->data.binary || !loaded->data.utf8;d->bom=loaded->data.bom;
                 if(binary) {
                     d->editor->SetText(HexPreview(loaded->data.bytes,d->stamp.size),true);
                     if(!loaded->data.utf8 && !loaded->data.binary) d->name+=" · non-UTF-8";
-                } else {
-                    d->editor->Adopt(*loader,loaded->data.eol);
+                } else d->editor->Adopt(*loader,loaded->data.eol);
+                d->editor->SetLanguage(binary?"preview.txt":path,!binary && d->stamp.size>8*1024*1024);d->editor->ApplySettings(fEditorSettings);
+            }
+            if(reloadID) {
+                auto* existing=ByID(reloadID);
+                if(!existing || !existing->editor || existing->editor->InputRevision()!=reloadRevision || !d->editor) {
+                    delete d->view;Notice("Reload was not applied because the document changed or closed.");finish();return;
                 }
-                d->editor->SetLanguage(binary?"preview.txt":path,!binary && d->stamp.size>8*1024*1024);
-                d->editor->ApplySettings(fEditorSettings);
+                CancelCompletion();CloseLanguage(*existing);ClearRecovery(*existing);++existing->formatSerial;
+                d->editor->State()->revision=reloadRevision+1;
+                for(auto& group:fPanes) for(auto& tab:group->tabs) if(tab->document==reloadID) {
+                    auto state=ViewState(*tab);tab->editor->ShareDocument(*d->editor);RestoreView(*tab,state);
+                }
+                existing->buffer=d->editor->State();existing->stamp=d->stamp;existing->bom=d->bom;existing->name=d->name;existing->external=false;
+                delete d->view;UpdateTabs();finish();return;
             }
             auto* original=ByID(originalID);
-            bool front=activate && focus==fFocusSerial && (!original || !original->editor || original->editor->Revision()==originalRevision);
-            fDocumentsLayout->AddView(d->view);fDocuments.push_back(std::move(d));
+            bool front=activate && focus==fFocusSerial && (!original || !original->editor || original->editor->InputRevision()==originalRevision);
+            // An explicit file open may finish in the background; a stale
+            // preview must never replace a newer choice or take input focus.
+            if(preview && !front) { delete d->view;finish();return; }
+            auto* document=d.get();fDocuments.push_back(std::move(d));
+            ShowDocument(*pane,*document,line,column,preview,front,focusEditor,true);
             if(activate) RememberRecent(path,false);
-            if(front) SelectTab(fDocuments.size()-1);else UpdateTabs();
-            if(auto* editor=fDocuments.back()->editor) {
-                auto restored=fRestoreDocuments.find(path);
-                if(restored!=fRestoreDocuments.end()) {
-                    int64 caret=0,anchor=0,first=0;int32 zoom=0,wrap=0;auto& state=restored->second;
-                    state.FindInt64("caret",&caret);state.FindInt64("anchor",&anchor);state.FindInt64("first",&first);state.FindInt32("zoom",&zoom);state.FindInt32("wrap",&wrap);
-                    editor->SendMessage(SCI_SETSEL,anchor,caret);editor->SendMessage(SCI_SETZOOM,zoom);editor->SendMessage(SCI_SETWRAPMODE,wrap);editor->SendMessage(SCI_SETFIRSTVISIBLELINE,first);
-                    fRestoreDocuments.erase(restored);
-                } else if(front) editor->GoTo(line,column);
-            }
-            FinishRestore();SaveSettings();
+            auto restored=fRestoreDocuments.find(path);
+            if(restored!=fRestoreDocuments.end()) for(auto& tab:pane->tabs) if(tab->document==document->id) RestoreView(*tab,restored->second);
+            finish();
         };
-    },{},[this,path](const std::string& error){fPendingOpen.erase(path);Notice("Cannot open "+path+": "+error);FinishRestore();});
+    },{},[this,path,preview](const std::string& error) {
+        fPendingOpen.erase(path);fPendingRequests.erase(path);Notice("Open failed: "+error);FinishRestore();
+    });
 }
 void Workspace::Save(Document* d,bool saveAs) {
     if(!d || !d->editor || d->saving || d->editor->SendMessage(SCI_GETREADONLY)) return;
+    for(auto& pane:fPanes) for(auto& tab:pane->tabs) if(tab->document==d->id) tab->preview=false;
+    UpdateTabs();
     if(saveAs || d->path.empty()) {
         if(fSavePanel && fSavePanel->IsShowing()) { fSavePanel->Window()->Activate();return; }
         fSavePanelID=d->id;fSavePanelAccepted=false;BMessage message(kSaveChosen);
@@ -394,7 +401,7 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
     auto* d=ByID(id);if(!d || !d->editor || d->saving) return;
     std::string path=CanonicalPath(input);FileStamp expected=d->path==path?d->stamp:StatFile(path);
     for(const auto& other:fDocuments) if(other->id!=id && other->path==path) {
-        d->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();
+        d->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;
         Notice("That file is already open in another tab. Close that tab or choose another name.");return;
     }
     // Save As replacement was confirmed by the native BFilePanel.
@@ -406,18 +413,18 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
             auto* document=ByID(id);if(!document) return;
             document->saving=false;
             if(!error.empty()) {
-                document->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();Notice(error);(new BAlert("Save File",error.c_str(),"OK"))->Go();return;
+                document->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;Notice(error);(new BAlert("Save File",error.c_str(),"OK"))->Go();return;
             }
             if(document->path!=path) CloseLanguage(*document);
             document->path=path;document->name=fs::path(path).filename().string();document->stamp=stamp;document->external=false;
             RememberRecent(path,false);
             std::string_view saved(*text);if(document->bom) saved.remove_prefix(3);
             if(document->editor->Matches(saved)) { document->editor->MarkSaved();ClearRecovery(*document); }
-            document->editor->SetLanguage(path,stamp.size>8*1024*1024);UpdateTabs();SaveSettings();
+            for(auto& pane:fPanes) for(auto& tab:pane->tabs) if(tab->document==id && tab->editor) tab->editor->SetLanguage(path,stamp.size>8*1024*1024);UpdateTabs();SaveSettings();
             if(auto* server=EnsureLanguage(*document);server && server->Ready()) { SyncLanguage(*document,*server);server->Save(document->serverURI,std::string(saved)); }
             if(document->closeAfterSave) {
                 document->closeAfterSave=false;
-                for(size_t i=0;i<fDocuments.size();++i) if(fDocuments[i]->id==id) { CloseTab(i);break; }
+                CloseView(document->closeView);
             }
             fGit->Refresh();
             RefreshIndex();
@@ -427,7 +434,7 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
         };
     },{},[this,id](const std::string& error) {
         if(auto* document=ByID(id)) { document->saving=false;document->closeAfterSave=false; }
-        fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();Notice("Save failed: "+error);
+        fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;Notice("Save failed: "+error);
     });
 }
 void Workspace::ContinueSaveAll() {
@@ -436,41 +443,6 @@ void Workspace::ContinueSaveAll() {
         if(document && document->saving) return;
         if(document && document->editor && document->editor->Dirty()) { Save(document);return; }
         fSaveQueue.pop_front();
-    }
-}
-bool Workspace::CloseTab(int index) {
-    if(index<0 || index>=static_cast<int>(fDocuments.size())) return false;
-    auto* d=fDocuments[index].get();
-    if(d->saving) { d->closeAfterSave=true;return false; }
-    if(d->editor && d->editor->Dirty()) {
-        int32 choice=(new BAlert("Unsaved Changes",("Save changes to "+d->name+"?").c_str(),"Cancel","Discard","Save",B_WIDTH_AS_USUAL,B_WARNING_ALERT))->Go();
-        if(choice==0) { fCloseQueue.clear();return false; }
-        if(choice==2) { d->closeAfterSave=true;Save(d);return false; }
-    }
-    ClearRecovery(*d);
-    CloseLanguage(*d);fJobs->Cancel("format-"+std::to_string(d->id));
-    BView* view=d->view;fDocumentsLayout->RemoveView(view);view->RemoveSelf();delete view;fDocuments.erase(fDocuments.begin()+index);
-    if(fDocuments.empty()) { fSelected=-1;fDocumentsLayout->SetVisibleItem(int32(0));UpdateTabs();UpdateSymbolBar(); }
-    else SelectTab(std::clamp(fSelected-(index<fSelected?1:0),0,static_cast<int>(fDocuments.size())-1));
-    SaveSettings();return true;
-}
-void Workspace::CloseTabs(int keep) {
-    if(keep<-1 || keep>=static_cast<int>(fDocuments.size())) return;
-    if(fSavePanel && fSavePanel->IsShowing()) { fSavePanel->Window()->Activate();return; }
-    for(auto id:fCloseQueue) if(auto* document=ByID(id)) document->closeAfterSave=false;
-    fCloseQueue.clear();
-    if(keep>=0) { fDocuments[keep]->closeAfterSave=false;SelectTab(keep); }
-    for(size_t i=0;i<fDocuments.size();++i) if(static_cast<int>(i)!=keep) fCloseQueue.push_back(fDocuments[i]->id);
-    ContinueCloseTabs();
-}
-void Workspace::ContinueCloseTabs() {
-    // Store document identities so asynchronous saves and newly opened tabs
-    // cannot shift the set being closed. A save or cancellation stops this pass.
-    while(!fCloseQueue.empty()) {
-        int64 id=fCloseQueue.front();int index=-1;
-        for(size_t i=0;i<fDocuments.size();++i) if(fDocuments[i]->id==id) { index=i;break; }
-        if(index>=0 && !CloseTab(index)) return;
-        fCloseQueue.pop_front();
     }
 }
 bool Workspace::QuitRequested() {
@@ -497,10 +469,13 @@ void Workspace::ApplyTheme(int index) {
     auto* filesTitle=static_cast<BStringView*>(FindView("files title"));
     BSize titleSize(filesTitle->StringWidth(filesTitle->Text())+2,B_SIZE_UNSET);
     filesTitle->SetExplicitMinSize(titleSize);filesTitle->SetExplicitMaxSize(titleSize);
-    fExplorer->ApplyTheme(theme);fRefresh->ApplyTheme(theme);fTabs->ApplyTheme(theme);fTerminal->ApplyTheme(theme);fGit->ApplySettings(fEditorSettings);fSymbolBar->ApplyTheme(theme);
-    for(auto& d:fDocuments) {
-        if(d->editor) d->editor->ApplySettings(fEditorSettings);
-        if(auto* preview=dynamic_cast<PreviewView*>(d->view)) preview->ApplyTheme(theme);
+    fExplorer->ApplyTheme(theme);fRefresh->ApplyTheme(theme);fTerminal->ApplyTheme(theme);fGit->ApplySettings(fEditorSettings);fSymbolBar->ApplyTheme(theme);
+    for(auto& pane:fPanes) {
+        pane->strip->ApplyTheme(theme);
+        for(auto& tab:pane->tabs) {
+            if(tab->editor) tab->editor->ApplySettings(fEditorSettings);
+            if(auto* preview=dynamic_cast<PreviewView*>(tab->view)) preview->ApplyTheme(theme);
+        }
     }
     MarkTheme(fThemes,fEditorSettings.theme);
     if(fPreferencesWindow.IsValid()) { BMessage settings(kSyncPreferences);fEditorSettings.WriteTo(settings);fPreferencesWindow.SendMessage(&settings); }
@@ -518,7 +493,7 @@ void Workspace::ShowFind() {
 }
 void Workspace::Search(bool search) {
     if(fProject.empty()) { Notice("Open a project folder first.");return; }
-    new SearchWindow(this,fProject,fIndex,search,Theme::Builtins()[fEditorSettings.theme]);
+    new SearchWindow(this,fProject,fIndex,search,Theme::Builtins()[fEditorSettings.theme],fPreviewTabs);
 }
 void Workspace::PromptLine() { new PromptWindow(this,"Go to Line","Line or line:column",kGoToResult); }
 void Workspace::CopyPermalink() {
@@ -548,9 +523,10 @@ void Workspace::RememberRecent(const std::string& path,bool folder) {
 void Workspace::RestoreSettings(bool restoreSession) {
     BFile file((fSettings+"/settings").c_str(),B_READ_ONLY);BMessage settings;
     settings.Unflatten(&file);fRestoring=true;
-    fEditorSettings.ReadFrom(settings);
+    fEditorSettings.ReadFrom(settings);bool previewTabs=true;if(settings.FindBool("preview_tabs",&previewTabs)==B_OK) fPreviewTabs=previewTabs;
     BRect frame;if(settings.FindRect("frame",&frame)==B_OK && frame.Width()>600 && frame.Height()>400) { MoveTo(frame.LeftTop());ResizeTo(frame.Width(),frame.Height()); }
     if(restoreSession) {
+        settings.FindMessage("editor_layout",&fRestoreLayout);
         const char* project=nullptr;if(settings.FindString("project",&project)==B_OK && project && *project) OpenProject(project);
         const char* path=nullptr;
         for(int32 i=0;settings.FindString("file",i,&path)==B_OK;++i) fRestorePaths.push_back(path);
@@ -566,6 +542,7 @@ void Workspace::RestoreSettings(bool restoreSession) {
 void Workspace::SaveSettings() {
     if(fRestoring) return;
     BMessage settings;fEditorSettings.WriteTo(settings);settings.AddRect("frame",Frame());settings.AddString("project",fProject.c_str());
+    settings.AddBool("preview_tabs",fPreviewTabs);auto layout=LayoutState(*fLayout);settings.AddMessage("editor_layout",&layout);
     if(auto* d=Current()) settings.AddString("selected",d->path.empty()?d->recoveryFile.c_str():d->path.c_str());
     for(const auto& d:fDocuments) if(!d->path.empty()) {
         settings.AddString("file",d->path.c_str());BMessage state;state.AddString("path",d->path.c_str());
@@ -589,7 +566,8 @@ void Workspace::FinishRestore() {
     }
     if(!fPendingOpen.empty()) return;
     fRestoring=false;
-    if(!fFocusSerial && !fDocuments.empty()) {
+    if(!fFocusSerial && !fRestoreLayout.IsEmpty()) RestoreLayout();
+    else if(!fFocusSerial && !fDocuments.empty()) {
         size_t selected=0;for(size_t i=0;i<fDocuments.size();++i) if(fDocuments[i]->path==fRestoreSelected || fDocuments[i]->recoveryFile==fRestoreSelected) { selected=i;break; }
         SelectTab(selected);
     }
@@ -609,7 +587,7 @@ void Workspace::RestoreDraft(const std::string& file) {
             d->editor=new Editor();d->view=d->editor;d->editor->Adopt(*loader,draft.eol);d->editor->MarkRecovered();
             d->editor->SetLanguage(d->path,d->editor->SendMessage(SCI_GETLENGTH)>8*1024*1024);d->editor->ApplySettings(fEditorSettings);
             d->recoveryRevision=d->editor->Revision();d->lastRecovery=system_time();
-            fDocumentsLayout->AddView(d->view);fDocuments.push_back(std::move(d));
+            AddTab(*fActivePane,*d,false,true);fDocuments.push_back(std::move(d));
             fDocuments.back()->editor->SendMessage(SCI_SETSEL,draft.anchor,draft.caret);fDocuments.back()->editor->SendMessage(SCI_SETFIRSTVISIBLELINE,draft.firstLine);
             FinishRestore();Notice("Recovered unsaved changes. Save the document to keep them in its source file.");
         };
@@ -679,14 +657,19 @@ void Workspace::MessageReceived(BMessage* message) {
     // operate on the current tab; that position is not a document/session index.
     bool currentTab=false;
     if(message->FindBool("current_tab",&currentTab)==B_OK && currentTab) message->RemoveName("index");
+    SyncFocus();
+    int64 paneID=0;if(message->FindInt64("pane",&paneID)==B_OK) {
+        auto* pane=FindPane(paneID);if(!pane) return;ActivatePane(pane);
+    }
     auto* d=Current();auto* editor=d?d->editor:nullptr;
     auto tabIndex=[&] {
         int64 id;
         if(message->FindInt64("tab_id",&id)==B_OK) {
-            for(size_t i=0;i<fDocuments.size();++i) if(fDocuments[i]->id==id) return static_cast<int>(i);
+            for(size_t i=0;i<fActivePane->tabs.size();++i) if(fActivePane->tabs[i]->id==id) return static_cast<int>(i);
             return -1;
         }
-        int32 index=fSelected;message->FindInt32("index",&index);return static_cast<int>(index);
+        int32 index;
+        return message->FindInt32("index",&index)==B_OK?static_cast<int>(index):fActivePane->selected;
     };
     switch(message->what) {
         case kLanguageTick:LanguageTick();break;
@@ -698,7 +681,7 @@ void Workspace::MessageReceived(BMessage* message) {
         }
         case kFormatPrettier:case kComplete:case kCompletionChosen: {
             void* source=nullptr;if(message->FindPointer("editor",&source)!=B_OK) source=editor;
-            Editor* target=nullptr;for(auto& document:fDocuments) if(document->editor==source) target=document->editor;
+            Editor* target=ByEditor(source)?static_cast<Editor*>(source):nullptr;
             if(message->what==kFormatPrettier) FormatDocument(target);
             else if(message->what==kComplete) Complete(target);
             else { const char* label;if(message->FindString("label",&label)==B_OK) AcceptCompletion(target,label); }
@@ -707,18 +690,20 @@ void Workspace::MessageReceived(BMessage* message) {
         case kCancelCompletion:CancelCompletion();break;
         case kEditorText:case kEditorTyped: {
             void* source=nullptr;message->FindPointer("editor",&source);
-            for(auto& document:fDocuments) if(document->editor==source) {
+            if(auto* document=ByEditor(source)) {
                 if(message->what==kEditorText) {
+                    UpdateTabs();
                     if(fCompletionDocument==document->id) CancelCompletion();
                     document->languageDirty=true;document->textChangedAt=system_time();
-                    if(document.get()==Current()) UpdateSymbolBar();
-                } else if(document.get()==Current() && fLanguageTools.completion) {
+                    if(document==Current()) UpdateSymbolBar();
+                } else if(document==Current() && fLanguageTools.completion) {
                     int32 character=0;message->FindInt32("character",&character);
                     fTypedDocument=document->id;fTypedAt=system_time();fTypedCharacter=character;
                 }
             }
             break;
         }
+        case kEditorFocus:SyncFocus();break;
         case kBrowseSymbols:fModeLayout->SetVisibleItem(int32(0));fSymbolBar->Browse();break;
         case kSymbolChosen: {
             int64 document=0,version=0;int32 symbol=-1;
@@ -751,7 +736,9 @@ void Workspace::MessageReceived(BMessage* message) {
         case kOpenFile: {
             const char* path;
             if(message->FindString("path",&path)==B_OK) {
-                int64 line=1,column=1;message->FindInt64("line",&line);message->FindInt64("column",&column);OpenFile(path,line,column);break;
+                int64 line=1,column=1;message->FindInt64("line",&line);message->FindInt64("column",&column);bool preview=false;message->FindBool("preview",&preview);
+                if(preview && !fPreviewTabs) break;
+                OpenFile(path,line,column,true,preview,0,!preview);break;
             }
             int32 index;
             if(!message->HasBool("file_picker") && message->FindInt32("index",&index)==B_OK) {
@@ -762,6 +749,19 @@ void Workspace::MessageReceived(BMessage* message) {
             if(!fProject.empty()) fOpenPanel->SetPanelDirectory(fProject.c_str());fOpenPanel->Show();break;
         }
         case kNewFile:NewFile();break;
+        case kKeepTab:KeepTab(tabIndex());break;
+        case kReopenTab:ReopenTab();break;
+        case kSplitRight:case kSplitDown:
+            if(message->HasInt64("tab_id")) SelectTab(tabIndex());
+            SplitPane(message->what==kSplitRight?B_HORIZONTAL:B_VERTICAL);break;
+        case kNextPane:CyclePane(1);break;
+        case kPreviousPane:CyclePane(-1);break;
+        case kClosePane:fClosingPane=fActivePane->id;CloseTabs();break;
+        case kPreviewTabs:
+            fPreviewTabs=!fPreviewTabs;
+            if(!fPreviewTabs) for(auto& pane:fPanes) for(auto& tab:pane->tabs) tab->preview=false;
+            if(auto* menu=dynamic_cast<BMenuBar*>(FindView("menu"))) if(auto* item=menu->FindItem(kPreviewTabs)) item->SetMarked(fPreviewTabs);
+            UpdateTabs();SaveSettings();break;
         case kSave:Save(d);break;
         case kSaveAs:Save(d,true);break;
         case kSaveAll:
@@ -781,7 +781,7 @@ void Workspace::MessageReceived(BMessage* message) {
         case B_CANCEL: {
             // BFilePanel also sends B_CANCEL when it hides after an accepted save.
             int64 token=0;if(message->FindInt64("panel_token",&token)!=B_OK || token!=fSavePanelToken || fSavePanelAccepted) break;
-            fQuitWhenSaved=false;fQuitDiscarded.clear();fSaveQueue.clear();fCloseQueue.clear();if(auto* document=ByID(fSavePanelID)) document->closeAfterSave=false;break;
+            fQuitWhenSaved=false;fQuitDiscarded.clear();fSaveQueue.clear();fCloseQueue.clear();fClosingPane=0;if(auto* document=ByID(fSavePanelID)) document->closeAfterSave=false;break;
         }
         case kCloseTab: {
             if(!message->HasInt64("tab_id") && !message->HasInt32("index") && fTerminal->OwnsFocus()) {
@@ -795,7 +795,7 @@ void Workspace::MessageReceived(BMessage* message) {
         case kEditorChanged:case kEditorPosition: {
             void* source=nullptr;message->FindPointer("editor",&source);
             if(message->what==kEditorChanged) {
-                for(auto& document:fDocuments) if(document->editor==source) ++document->revision;
+                if(auto* document=ByEditor(source)) ++document->revision;
                 UpdateTabs();
             } else if(editor==source) {
                 UpdateStatus();if(editor) fSymbolBar->SetPosition(editor->SendMessage(SCI_GETCURRENTPOS));

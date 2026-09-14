@@ -46,7 +46,7 @@ void TabStrip::Draw(BRect) {
         float width=Width(i);BRect rect(x,0,x+width-1,Bounds().bottom);
         bool selected=static_cast<int>(i)==fSelected;
         SetHighColor(selected?fTheme.background:fTheme.toolbar);FillRect(rect);
-        if(selected) { SetHighColor(fTheme.accent);FillRect(BRect(x,0,x+width-1,2)); }
+        if(selected) { SetHighColor(fActive?fTheme.accent:fTheme.border);FillRect(BRect(x,0,x+width-1,2)); }
         SetHighColor(fTheme.border);StrokeLine(rect.RightTop(),rect.RightBottom());
         SetLowColor(selected?fTheme.background:fTheme.toolbar);SetHighColor(selected?fTheme.text:fTheme.muted);
         float labelX=x+14;
@@ -54,7 +54,9 @@ void TabStrip::Draw(BRect) {
             PushState();SetDrawingMode(B_OP_ALPHA);SetBlendingMode(B_PIXEL_ALPHA,B_ALPHA_OVERLAY);
             DrawBitmap(fTabs[i].icon.get(),BPoint(x+10,9));PopState();labelX+=20;
         }
+        BFont font;GetFont(&font);auto face=font.Face();font.SetFace(fTabs[i].preview?uint16(B_ITALIC_FACE):face);SetFont(&font);
         BString name(fTabs[i].name.c_str());TruncateString(&name,B_TRUNCATE_MIDDLE,width-(fTabs[i].icon?70:50));DrawString(name.String(),BPoint(labelX,22));
+        font.SetFace(face);SetFont(&font);
         if(fTabs[i].dirty) FillEllipse(BPoint(x+width-17,17),3,3);
         else { StrokeLine(BPoint(x+width-21,13),BPoint(x+width-13,21));StrokeLine(BPoint(x+width-13,13),BPoint(x+width-21,21)); }
         x+=width;
@@ -70,6 +72,7 @@ void TabStrip::Draw(BRect) {
     }
 }
 void TabStrip::MouseDown(BPoint where) {
+    if(fPane) { MakeFocus();SendAction(kEditorFocus,-1); }
     int32 buttons=B_PRIMARY_MOUSE_BUTTON;Window()->CurrentMessage()->FindInt32("buttons",&buttons);
     int index=HitTab(where);
     if(buttons&B_SECONDARY_MOUSE_BUTTON) { if(index>=0) ContextMenu(where,index);return; }
@@ -78,7 +81,8 @@ void TabStrip::MouseDown(BPoint where) {
     if(index<0) return;
     float x=-fOffset;
     for(int i=0;i<index;++i) x+=Width(i);
-    SendAction(where.x>x+Width(index)-30?fActions.close:fActions.select,index);
+    int32 clicks=1;Window()->CurrentMessage()->FindInt32("clicks",&clicks);
+    SendAction(where.x>x+Width(index)-30?fActions.close:(fPane && clicks==2?kKeepTab:fActions.select),index);
 }
 void TabStrip::MouseMoved(BPoint where,uint32 transit,const BMessage*) {
     if(transit==B_EXITED_VIEW) { SetToolTip("");return; }
@@ -91,6 +95,7 @@ void TabStrip::MouseMoved(BPoint where,uint32 transit,const BMessage*) {
 void TabStrip::SendAction(uint32 command,int index) {
     if(!command || !Window()) return;
     BMessage message(command);
+    if(fPane) message.AddInt64("pane",fPane);
     if(index>=0) { message.AddInt32("index",index);message.AddInt64("tab_id",fTabs[index].id); }
     Window()->PostMessage(&message);
 }
@@ -98,8 +103,14 @@ void TabStrip::ContextMenu(BPoint where,int index) {
     BPopUpMenu menu("tab actions",false,false);
     auto add=[&](const char* label,uint32 command) {
         auto* message=new BMessage(command);message->AddInt32("index",index);message->AddInt64("tab_id",fTabs[index].id);
+        if(fPane) message->AddInt64("pane",fPane);
         auto* item=new BMenuItem(label,message);menu.AddItem(item);return item;
     };
+    if(fPane) {
+        add("Keep Open",kKeepTab)->SetEnabled(fTabs[index].preview);
+        add("Split Right",kSplitRight);add("Split Down",kSplitDown);menu.AddSeparatorItem();
+        add("Close",fActions.close);
+    }
     add("Close all",fActions.closeAll);
     add("Close others",fActions.closeOthers)->SetEnabled(fTabs.size()>1);
     menu.SetTargetForItems(Window());menu.Go(ConvertToScreen(where),true,true);

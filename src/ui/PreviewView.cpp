@@ -5,10 +5,13 @@
 #include <algorithm>
 #include <cmath>
 namespace kiri {
-PreviewView::PreviewView(std::unique_ptr<BBitmap> bitmap,std::string name,uint64_t bytes)
+PreviewView::PreviewView(std::shared_ptr<BBitmap> bitmap,std::string name,uint64_t bytes)
     :BView("image preview",B_WILL_DRAW|B_FULL_UPDATE_ON_RESIZE),fBitmap(std::move(bitmap)),fName(std::move(name)),fBytes(bytes) {
     SetExplicitMinSize(BSize(100,100));SetViewColor(fTheme.background);
     SetToolTip("Double-click for Fit / Actual Size. Drag to pan at Actual Size.");
+}
+PreviewView* PreviewView::Clone() const {
+    auto* view=new PreviewView(fBitmap,fName,fBytes);view->fActualSize=fActualSize;view->fPan=fPan;view->ApplyTheme(fTheme);return view;
 }
 void PreviewView::Draw(BRect update) {
     SetHighColor(fTheme.background);FillRect(update);
@@ -36,6 +39,7 @@ void PreviewView::Draw(BRect update) {
     DrawString(label.c_str(),BPoint((Bounds().Width()-StringWidth(label.c_str()))/2,Bounds().bottom-27));
 }
 void PreviewView::MouseDown(BPoint point) {
+    MakeFocus();
     int32 clicks=1;Window()->CurrentMessage()->FindInt32("clicks",&clicks);
     if(clicks==2) { fActualSize=!fActualSize;fPan=BPoint();Invalidate(); }
     else if(fActualSize) { fDragging=true;fDragPoint=point;SetMouseEventMask(B_POINTER_EVENTS,B_LOCK_WINDOW_FOCUS); }

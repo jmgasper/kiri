@@ -59,7 +59,7 @@ int TerminalPanel::IndexForMessage(const BMessage& message) const {
         for(size_t i=0;i<fSessions.size();++i) if(fSessions[i].id==id) return i;
         return -1;
     }
-    int32 index=fSelected;message.FindInt32("index",&index);return index;
+    int32 index;return message.FindInt32("index",&index)==B_OK?index:fSelected;
 }
 bool TerminalPanel::OwnsFocus() const {
     for(auto* view=Window()?Window()->CurrentFocus():nullptr;view;view=view->Parent()) if(view==this) return true;

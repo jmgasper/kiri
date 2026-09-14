@@ -8,21 +8,35 @@
 #include <cstdio>
 #include <signal.h>
 
-// Read-only inspection of the visible editor for native UI verification.
-// This message is deliberately confined to the disposable smoke harness.
+namespace kiri {
+// Read-only inspection stays in the disposable harness, outside the application.
+struct WorkspaceTestAccess {
+    static BMessage Inspect(Workspace& workspace) {
+        workspace.SyncFocus();BMessage reply(B_REPLY);auto* tab=workspace.CurrentTab();auto* editor=tab?tab->editor:nullptr;
+        reply.AddInt32("panes",workspace.fPanes.size());reply.AddInt32("documents",workspace.fDocuments.size());
+        reply.AddInt32("closed_tabs",workspace.fClosedTabs.size());reply.AddBool("preview_tabs",workspace.fPreviewTabs);
+        for(auto& pane:workspace.fPanes) for(auto& view:pane->tabs) {
+            auto* document=workspace.ByID(view->document);BMessage state=workspace.ViewState(*view);
+            state.AddInt64("pane",pane->id);state.AddInt64("tab",view->id);state.AddInt64("document",document->id);
+            state.AddString("path",document->path.c_str());state.AddBool("preview",view->preview);
+            state.AddBool("active",view.get()==tab);state.AddBool("dirty",view->editor && view->editor->Dirty());reply.AddMessage("view",&state);
+        }
+        if(editor) {
+            auto length=editor->SendMessage(SCI_GETLENGTH);reply.AddInt64("length",length);
+            if(length<=8192) { auto text=editor->Text();reply.AddString("text",text.c_str());reply.AddInt64("nul_count",std::count(text.begin(),text.end(),'\0')); }
+            reply.AddInt64("caret",editor->SendMessage(SCI_GETCURRENTPOS));reply.AddInt64("anchor",editor->SendMessage(SCI_GETANCHOR));
+            reply.AddBool("dirty",editor->Dirty());reply.AddBool("completion",editor->SendMessage(SCI_AUTOCACTIVE));
+        }
+        return reply;
+    }
+};
+}
 class ProbeWorkspace:public kiri::Workspace {
 public:
     explicit ProbeWorkspace(const std::string& settings):Workspace(settings) {}
     void MessageReceived(BMessage* message) override {
         if(message->what!='lprb') { Workspace::MessageReceived(message);return; }
-        BMessage reply(B_REPLY);auto* host=FindView("document host");auto* cards=dynamic_cast<BCardLayout*>(host->GetLayout());
-        auto* editor=cards && cards->VisibleItem()?dynamic_cast<kiri::Editor*>(cards->VisibleItem()->View()):nullptr;
-        if(editor) {
-            auto text=editor->Text();reply.AddString("text",text.c_str());reply.AddInt64("caret",editor->SendMessage(SCI_GETCURRENTPOS));
-            reply.AddInt64("length",text.size());reply.AddInt64("nul_count",std::count(text.begin(),text.end(),'\0'));
-            reply.AddInt64("anchor",editor->SendMessage(SCI_GETANCHOR));reply.AddBool("dirty",editor->Dirty());
-            reply.AddBool("completion",editor->SendMessage(SCI_AUTOCACTIVE));
-        }
+        auto reply=kiri::WorkspaceTestAccess::Inspect(*this);
         message->SendReply(&reply);
     }
 };

@@ -6,7 +6,8 @@
 namespace kiri {
 class PreviewView:public BView {
 public:
-    PreviewView(std::unique_ptr<BBitmap> bitmap,std::string name,uint64_t bytes);
+    PreviewView(std::shared_ptr<BBitmap> bitmap,std::string name,uint64_t bytes);
+    PreviewView* Clone() const;
     void Draw(BRect update) override;
     void MouseDown(BPoint point) override;
     void MouseMoved(BPoint point,uint32 transit,const BMessage* drag) override;
@@ -14,7 +15,7 @@ public:
     void MessageReceived(BMessage* message) override;
     void ApplyTheme(const Theme& theme) { fTheme=theme;SetViewColor(theme.background);Invalidate(); }
 private:
-    std::unique_ptr<BBitmap> fBitmap;
+    std::shared_ptr<BBitmap> fBitmap;
     std::string fName;
     uint64_t fBytes;
     bool fActualSize=false;

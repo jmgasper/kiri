@@ -33,6 +33,9 @@ signature. An optional third argument after the project sets another signature
 instance is in use. Use a different settings directory and project as well.
 Create the disposable project before launching it. Each card host's
 child count includes one empty placeholder in addition to the open tabs.
+For automatic pane/tab integration coverage, run `make check-workspace` inside
+the VM. The smoke harness's `lprb` message reports every pane's views, paths,
+preview/dirty flags and positions, plus the active editor's text up to 8 KiB.
 `tools/vm.py right-click X Y WIDTH HEIGHT` opens native context menus; use
 `screenshot -s -w OUTPUT.png` inside Haiku to capture only the active window.
 

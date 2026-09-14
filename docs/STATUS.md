@@ -1,5 +1,32 @@
 # Verification record
 
+## Nested editor panes and tab workflows — develop
+
+Verified September 14, 2026 in the existing Haiku R1/beta5 QEMU VM. The native
+build passed 163 core checks, 233 editor/worker checks, 80 language protocol
+checks and 118 workspace checks. Both Linux CMake/CTest suites passed.
+
+The new workspace suite uses real Haiku windows and shared Scintilla documents.
+It covers nested splits, independent selections/scrolling, shared edits and undo,
+save state, pane focus and find, preview reuse and edit/undo promotion, Keep Open,
+Close shortcuts, reopen positions, duplicate prevention, missing files, layout
+proportions, session recovery and concurrent opens. Deterministic formatting and
+LSP subprocesses check symbols, completion and delayed formatting across panes.
+A 32 MiB split shares the document pointer and took about 20 ms in this VM.
+
+Live keyboard/mouse checks in an isolated workspace verified Split Right/Down,
+three simultaneous shared views, independent line navigation, italic previews,
+double-click Keep Open and edit/undo promotion. Closing additional dirty views
+kept the document alive; the last dirty view offered Cancel/Discard/Save.
+Cancel preserved it and its close history, Save wrote the file and closed the
+view, and Reopen restored its cursor. Explicitly discarding an untitled draft
+left no reopen entry. The Close/Keep shortcut checks include a non-first tab,
+and terminal tab selection retains the same default-index behavior.
+
+See [editor panes and tab workflows](EDITOR_PANES.md) and the
+[native screenshot](screenshots/editor-panes.png). `make check-workspace` runs
+the new suite with disposable files, settings and application identity.
+
 ## 0.0.1 alpha public release
 
 The first public release uses version `0.0.1-alpha` and Haiku package version

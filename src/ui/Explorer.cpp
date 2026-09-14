@@ -70,20 +70,21 @@ void Explorer::CheckExpanded() {
         }
     }
 }
-void Explorer::OpenSelected() {
+void Explorer::OpenSelected(bool preview) {
     auto* item=static_cast<FileItem*>(ItemAt(CurrentSelection()));
     if(!item || item->placeholder) return;
-    if(item->entry.directory) { if(item->IsExpanded()) Collapse(item);else Expand(item);CheckExpanded(); }
-    else { BMessage msg(kOpenFile);msg.AddString("path",item->entry.path.c_str());Window()->PostMessage(&msg); }
+    if(item->entry.directory) { if(!preview) { if(item->IsExpanded()) Collapse(item);else Expand(item);CheckExpanded(); } }
+    else { BMessage msg(kOpenFile);msg.AddString("path",item->entry.path.c_str());msg.AddBool("preview",preview);Window()->PostMessage(&msg); }
 }
 void Explorer::MouseDown(BPoint where) {
     BOutlineListView::MouseDown(where);CheckExpanded();
     int32 clicks=1;Window()->CurrentMessage()->FindInt32("clicks",&clicks);
-    if(clicks==2) OpenSelected();
+    int32 buttons=B_PRIMARY_MOUSE_BUTTON;Window()->CurrentMessage()->FindInt32("buttons",&buttons);
+    if(buttons&B_PRIMARY_MOUSE_BUTTON) OpenSelected(clicks!=2);
 }
 void Explorer::KeyDown(const char* bytes,int32 count) {
     if(count==1 && (bytes[0]==B_ENTER || bytes[0]==' ')) OpenSelected();
-    else { BOutlineListView::KeyDown(bytes,count);CheckExpanded(); }
+    else { BOutlineListView::KeyDown(bytes,count);CheckExpanded();if(count==1 && (bytes[0]==B_UP_ARROW || bytes[0]==B_DOWN_ARROW)) OpenSelected(true); }
 }
 void Explorer::MessageReceived(BMessage* message) { BOutlineListView::MessageReceived(message); }
 }

@@ -31,23 +31,26 @@ void Workspace::ShowLanguageTools() {
     auto* window=new LanguageToolsWindow(BMessenger(this),fLanguageTools,fSettings,Frame());fLanguageToolsWindow=BMessenger(window);window->Show();
 }
 void Workspace::FormatDocument(Editor* source) {
-    Document* document=nullptr;for(auto& d:fDocuments) if(d->editor==source) document=d.get();
+    Document* document=ByEditor(source);
     if(!document || !source || source->SendMessage(SCI_GETREADONLY)) return;
     if(document->path.empty()) { Notice("Save this file with an extension before formatting with Prettier.");return; }
     if(source->SendMessage(SCI_GETLENGTH)>static_cast<sptr_t>(LanguageLimit)) { Notice("Prettier formatting is limited to files up to 8 MiB.");return; }
+    int64 view=0;for(auto& pane:fPanes) for(auto& tab:pane->tabs) if(tab->editor==source) view=tab->id;
+    document->formatView=view;
     auto id=document->id,serial=++document->formatSerial;auto path=document->path,project=fProject,settings=fSettings,command=fLanguageTools.prettier;
     auto text=std::make_shared<std::string>(source->Text());Notice("Formatting "+document->name+" with Prettier…");
-    fJobs->Submit([this,id,serial,path,project,settings,command,text](const auto& cancel) {
+    fJobs->Submit([this,id,view,serial,path,project,settings,command,text](const auto& cancel) {
         auto result=FormatWithPrettier(command,path,project,settings,*text,&cancel);
-        return [this,id,serial,path,text,result=std::move(result)] {
-            auto* d=ByID(id);if(!d || !d->editor || d->path!=path || d->formatSerial!=serial) return;
+        return [this,id,view,serial,path,text,result=std::move(result)] {
+            auto* d=ByID(id);auto* tab=FindTab(view);if(!d || !tab || !tab->editor || d->path!=path || d->formatSerial!=serial) return;
+            auto* editor=tab->editor;
             if(!result.ok()) {
                 Notice("Prettier: "+result.diagnostic());
                 (new BAlert("Prettier",result.diagnostic().c_str(),"OK"))->Go();return;
             }
-            if(!d->editor->Matches(*text)) { Notice("Formatting was not applied because the file changed. Run Format with Prettier again.");return; }
+            if(!editor->Matches(*text)) { Notice("Formatting was not applied because the file changed. Run Format with Prettier again.");return; }
             if(result.output==*text) { Notice("Prettier: no changes needed.");return; }
-            d->editor->ApplyEdits({{0,text->size(),result.output}},true);d->languageDirty=true;d->textChangedAt=0;
+            editor->ApplyEdits({{0,text->size(),result.output}},true);d->languageDirty=true;d->textChangedAt=0;
             UpdateTabs();Notice("Formatted "+d->name+" with Prettier. Undo restores the previous text.");
         };
     },"format-"+std::to_string(id),[this](const std::string& error){Notice("Prettier: "+error);});
@@ -55,12 +58,12 @@ void Workspace::FormatDocument(Editor* source) {
 void Workspace::CancelCompletion() {
     ++fCompletionSerial;fTypedDocument=0;
     if(auto* document=ByID(fCompletionDocument)) {
-        if(document->editor) document->editor->CancelCompletions();
+        if(auto* tab=FindTab(fCompletionView);tab && tab->editor) tab->editor->CancelCompletions();
         auto found=fServers.find(document->serverKey);
         if(found!=fServers.end() && found->second.client) found->second.client->Cancel(document->completionRequest);
         document->completionRequest=0;
     }
-    fCompletionDocument=0;fCompletionText.clear();fCompletions.clear();fCompletionLabels.clear();
+    fCompletionDocument=0;fCompletionView=0;fCompletionText.clear();fCompletions.clear();fCompletionLabels.clear();
 }
 void Workspace::CloseLanguage(Document& document) {
     if(fCompletionDocument==document.id || fTypedDocument==document.id) CancelCompletion();
@@ -190,14 +193,14 @@ void Workspace::Complete(Editor* source,bool manual,int character) {
     auto triggers=capabilities["completionProvider"].is_object()?capabilities["completionProvider"].value("triggerCharacters",Json::array()):Json::array();
     if(character>0 && character<128 && std::find(triggers.begin(),triggers.end(),std::string(1,char(character)))!=triggers.end()) context={{"triggerKind",2},{"triggerCharacter",std::string(1,char(character))}};
     else if(!manual && !(std::isalnum(static_cast<unsigned char>(character)) || character=='_' || character>=128)) return;
-    fCompletionDocument=d->id;fCompletionText=*text;fCompletionCaret=caret;fCompletionWordStart=start;
+    fCompletionDocument=d->id;fCompletionView=CurrentTab()->id;fCompletionText=*text;fCompletionCaret=caret;fCompletionWordStart=start;
     auto id=d->id,serial=fCompletionSerial,generation=fLanguageGeneration;auto uri=d->serverURI;
     d->completionRequest=server->Request("textDocument/completion",{{"textDocument",{{"uri",uri}}},{"position",PositionJSON(PositionAt(*text,caret,server->Encoding()))},{"context",context}},
         [this,id,serial,generation,caret,start,text,manual](RpcReply reply) {
             auto items=reply.ok()?ReadCompletions(reply.result):std::vector<CompletionItem>();
             fJobs->Post([this,id,serial,generation,caret,start,text,manual,reply=std::move(reply),items=std::move(items)]() mutable {
                 auto* d=ByID(id);
-                if(!d || d!=Current() || generation!=fLanguageGeneration || serial!=fCompletionSerial || !d->editor->Matches(*text) || d->editor->SendMessage(SCI_GETCURRENTPOS)!=caret) return;
+                if(!d || d!=Current() || !CurrentTab() || CurrentTab()->id!=fCompletionView || generation!=fLanguageGeneration || serial!=fCompletionSerial || !d->editor->Matches(*text) || d->editor->SendMessage(SCI_GETCURRENTPOS)!=caret) return;
                 d->completionRequest=0;
                 if(!reply.ok()) { if(manual) Notice(reply.error);return; }
                 auto typed=text->substr(start,caret-start);std::set<std::string> labels;

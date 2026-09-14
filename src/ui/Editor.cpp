@@ -18,17 +18,17 @@ namespace kiri {
 namespace {
 class EditInputFilter:public BMessageFilter {
 public:
-    explicit EditInputFilter(int64& revision,Editor* editor):BMessageFilter(B_ANY_DELIVERY,B_ANY_SOURCE),fRevision(revision),fEditor(editor) {}
+    explicit EditInputFilter(Editor* editor):BMessageFilter(B_ANY_DELIVERY,B_ANY_SOURCE),fEditor(editor) {}
     filter_result Filter(BMessage* message,BHandler**) override {
         if(fEditor->FilterLanguageKey(message)) return B_SKIP_MESSAGE;
         switch(message->what) {
             case B_KEY_DOWN:case B_UNMAPPED_KEY_DOWN:case B_INPUT_METHOD_EVENT:
-            case B_CUT:case B_PASTE:case B_UNDO:case B_REDO:case B_SIMPLE_DATA:++fRevision;break;
-            default:if(message->WasDropped()) ++fRevision;break;
+            case B_CUT:case B_PASTE:case B_UNDO:case B_REDO:case B_SIMPLE_DATA:fEditor->NoteInput();break;
+            default:if(message->WasDropped()) fEditor->NoteInput();break;
         }
         return B_DISPATCH_MESSAGE;
     }
-private:int64& fRevision;Editor* fEditor;
+private:Editor* fEditor;
 };
 }
 Editor::Editor():BScintillaView("source",B_FRAME_EVENTS,true,true,B_NO_BORDER) {
@@ -62,7 +62,7 @@ Editor::Editor():BScintillaView("source",B_FRAME_EVENTS,true,true,B_NO_BORDER) {
     SendMessage(SCI_AUTOCSETSEPARATOR,'\n');SendMessage(SCI_AUTOCSETTYPESEPARATOR,31);SendMessage(SCI_AUTOCSETORDER,SC_ORDER_CUSTOM);
     SendMessage(SCI_AUTOCSETMAXHEIGHT,10);SendMessage(SCI_AUTOCSETMAXWIDTH,80);
     SendMessage(SCI_AUTOCSETCHOOSESINGLE,0);SendMessage(SCI_AUTOCSETAUTOHIDE,0);
-    Target()->AddFilter(new EditInputFilter(fRevision,this));
+    Target()->AddFilter(new EditInputFilter(this));
 }
 void Editor::AllAttached() {
     BScintillaView::AllAttached();
@@ -73,14 +73,17 @@ void Editor::AllAttached() {
 sptr_t Editor::SendMessage(unsigned int message,uptr_t wParam,sptr_t lParam) {
     // The Haiku port delivers SCN_MODIFIED asynchronously. Count direct edits
     // and input dispatch synchronously so a save cannot miss queued changes.
+    bool edit=false;
     if(!fLoading) switch(message) {
         case SCI_ADDTEXT:case SCI_APPENDTEXT:case SCI_INSERTTEXT:case SCI_CLEARALL:
         case SCI_SETTEXT:case SCI_REPLACESEL:case SCI_REPLACETARGET:case SCI_REPLACETARGETRE:
         case SCI_DELETERANGE:case SCI_CLEAR:case SCI_CUT:case SCI_PASTE:case SCI_UNDO:case SCI_REDO:
-        case SCI_SETLINEINDENTATION:++fRevision;break;
+        case SCI_SETLINEINDENTATION:NoteInput();edit=true;break;
         default:break;
     }
-    return BScintillaView::SendMessage(message,wParam,lParam);
+    auto result=BScintillaView::SendMessage(message,wParam,lParam);
+    if(edit && Dirty()) ++fState->changes;
+    return result;
 }
 void Editor::Style(int id,rgb_color color,bool bold) {
     SendMessage(SCI_STYLESETFORE,id,SciColor(color));SendMessage(SCI_STYLESETBOLD,id,bold);
@@ -227,6 +230,14 @@ void Editor::Adopt(EditorLoader& loader,int eol) {
     SendMessage(SCI_EMPTYUNDOBUFFER);SendMessage(SCI_SETUNDOCOLLECTION,1);SendMessage(SCI_SETSAVEPOINT);
     fLoading=false;
 }
+void Editor::ShareDocument(Editor& source) {
+    fLoading=true;
+    SendMessage(SCI_SETDOCPOINTER,0,source.SendMessage(SCI_GETDOCPOINTER));
+    fState=source.fState;fLexer=source.fLexer;fLanguage=source.fLanguage;
+    SendMessage(SCI_SETEOLMODE,source.SendMessage(SCI_GETEOLMODE));
+    SendMessage(SCI_SETREADONLY,source.SendMessage(SCI_GETREADONLY));
+    fLoading=false;ApplySettings(source.fSettings);
+}
 std::string Editor::Text() {
     size_t size=SendMessage(SCI_GETLENGTH);std::string text(size+1,'\0');
     SendMessage(SCI_GETTEXT,size+1,reinterpret_cast<sptr_t>(text.data()));text.resize(size);return text;
@@ -269,8 +280,9 @@ bool Editor::FilterLanguageKey(BMessage* message) {
     return false;
 }
 void Editor::NotificationReceived(SCNotification* n) {
-    if(!fLoading && n->nmhdr.code==SCN_MODIFIED && (n->modificationType&(SC_MOD_INSERTTEXT|SC_MOD_DELETETEXT))) ++fRevision;
+    if(!fLoading && n->nmhdr.code==SCN_MODIFIED && (n->modificationType&(SC_MOD_INSERTTEXT|SC_MOD_DELETETEXT))) { ++fState->revision;++fState->changes; }
     if(fLoading || !Window()) return;
+    if(n->nmhdr.code==SCN_FOCUSIN) { BMessage message(kEditorFocus);message.AddPointer("editor",this);Window()->PostMessage(&message); }
     if(n->nmhdr.code==SCN_MODIFIED && (n->modificationType&(SC_MOD_INSERTTEXT|SC_MOD_DELETETEXT))) {
         BMessage message(kEditorText);message.AddPointer("editor",this);Window()->PostMessage(&message);
     }
@@ -357,11 +369,11 @@ int Editor::ReplaceAll(const std::string& query,const std::string& replacement,b
     }
     SendMessage(SCI_ENDUNDOACTION);return count;
 }
-void Editor::GoTo(size_t line,size_t column) {
+void Editor::GoTo(size_t line,size_t column,bool focus) {
     sptr_t pos=SendMessage(SCI_POSITIONFROMLINE,line?line-1:0);
     if(pos<0) pos=SendMessage(SCI_GETLENGTH);
     auto end=SendMessage(SCI_GETLINEENDPOSITION,SendMessage(SCI_LINEFROMPOSITION,pos));
     for(size_t i=1;i<column && pos<end;++i) pos=SendMessage(SCI_POSITIONAFTER,pos);
-    SendMessage(SCI_GOTOPOS,pos);SendMessage(SCI_SCROLLCARET);MakeFocus();
+    SendMessage(SCI_GOTOPOS,pos);SendMessage(SCI_SCROLLCARET);if(focus) MakeFocus();
 }
 }

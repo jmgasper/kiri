@@ -7,7 +7,7 @@
 #include <memory>
 class BBitmap;
 namespace kiri {
-struct TabLabel { std::string name,tooltip; bool dirty=false; int64 id=0; std::shared_ptr<const BBitmap> icon; };
+struct TabLabel { std::string name,tooltip; bool dirty=false; int64 id=0; std::shared_ptr<const BBitmap> icon;bool preview=false; };
 struct TabActions {
     uint32 select=kSelectTab,close=kCloseTab,closeAll=kCloseAllTabs,closeOthers=kCloseOtherTabs,create=0;
 };
@@ -20,6 +20,8 @@ public:
     void MouseMoved(BPoint where,uint32 transit,const BMessage* drag) override;
     void MessageReceived(BMessage* message) override;
     void SetTabs(std::vector<TabLabel> tabs,int selected);
+    void SetPane(int64 pane) { fPane=pane; }
+    void SetActive(bool active) { if(fActive!=active) { fActive=active;Invalidate(); } }
     void ApplyTheme(const Theme& theme) { fTheme=theme;SetViewColor(theme.toolbar);Invalidate(); }
 private:
     float Width(size_t index) const;
@@ -31,6 +33,8 @@ private:
     void ContextMenu(BPoint where,int index);
     std::vector<TabLabel> fTabs;
     int fSelected=-1;
+    int64 fPane=0;
+    bool fActive=true;
     float fOffset=0;
     TabActions fActions;
     std::string fCreateLabel;

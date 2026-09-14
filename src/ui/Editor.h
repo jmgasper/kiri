@@ -7,6 +7,10 @@
 #include <ILoader.h>
 #include <memory>
 namespace kiri {
+// Scintilla owns the text and undo stack through each attached view's document
+// reference. This state follows that same buffer, including synchronous input
+// revisions (Haiku delivers Scintilla's notifications asynchronously).
+struct EditorState { int64 revision=0,inputRevision=0,changes=0;bool recovered=false; };
 struct EditorLoader {
     Scintilla::ILoader* loader=nullptr;
     ~EditorLoader() { if(loader) loader->Release(); }
@@ -25,30 +29,34 @@ public:
     void SetText(const std::string& bytes,bool readOnly=false,int eol=2);
     std::shared_ptr<EditorLoader> CreateLoader(bool large);
     void Adopt(EditorLoader& loader,int eol=2);
+    void ShareDocument(Editor& source);
+    std::shared_ptr<EditorState> State() const { return fState; }
+    void NoteInput() { ++fState->revision;++fState->inputRevision; }
+    int64 InputRevision() const { return fState->inputRevision; }
     std::string Text();
     bool Matches(std::string_view text);
     void ApplyEdits(const std::vector<TextEdit>& edits,bool preserveLines=false);
     void ShowCompletions(const std::vector<std::string>& labels);
     void CancelCompletions();
     bool FilterLanguageKey(BMessage* message);
-    bool Dirty() { return fRecovered || SendMessage(SCI_GETMODIFY)!=0; }
-    void MarkRecovered() { fRecovered=true;++fRevision; }
-    void MarkSaved() { fRecovered=false;SendMessage(SCI_SETSAVEPOINT); }
-    int64 Revision() const { return fRevision; }
+    bool Dirty() { return fState->recovered || SendMessage(SCI_GETMODIFY)!=0; }
+    void MarkRecovered() { fState->recovered=true;++fState->changes;NoteInput(); }
+    void MarkSaved() { fState->recovered=false;SendMessage(SCI_SETSAVEPOINT); }
+    int64 Revision() const { return fState->revision; }
     const std::string& Language() const { return fLanguage; }
     bool Find(const std::string& query,bool backwards=false,bool matchCase=false,bool regex=false);
     bool ReplaceOne(const std::string& query,const std::string& replacement,bool matchCase=false);
     int ReplaceAll(const std::string& query,const std::string& replacement,bool matchCase=false);
-    void GoTo(size_t line,size_t column=1);
+    void GoTo(size_t line,size_t column=1,bool focus=true);
 private:
     void Style(int id,rgb_color color,bool bold=false);
     void UpdateMarginWidth();
     std::string fLexer="null",fLanguage="Plain Text";
     Theme fTheme=Theme::Builtins()[0];
     EditorSettings fSettings;
-    bool fLoading=false,fRecovered=false;
+    bool fLoading=false;
     int fDigits=0;
-    int64 fRevision=0;
+    std::shared_ptr<EditorState> fState=std::make_shared<EditorState>();
     std::vector<std::string> fCompletionLabels;
 };
 }

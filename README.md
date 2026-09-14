@@ -68,7 +68,7 @@ text and project settings, creates one undo step, and leaves saving to you.
 **Ctrl+Space** or **Complete Code** requests language-server suggestions;
 suggestions also appear while typing. Choose with Up/Down and Enter or Tab.
 
-The **Symbols** bar above each file lists variables, fields, classes, methods
+The **Symbols** bar above the editor panes lists variables, fields, classes, methods
 and functions and jumps to their declarations. It follows the active file and
 updates from unsaved text. **Edit → Language Tools…** configures Prettier,
 language-server commands and automatic suggestions.
@@ -87,6 +87,8 @@ for project-local versions, other languages, configuration and limits.
 
 ## Workspace
 
+![Nested editor panes with shared text and independent scrolling](docs/screenshots/editor-panes.png)
+
 - **File → Open Folder…** sets the lazy file tree, project index, Git repository and
   terminal directory. Expand folders and double-click files to open them.
   The window title shows the project folder. **View** contains controls for
@@ -100,6 +102,15 @@ for project-local versions, other languages, configuration and limits.
   keep their save prompts, and Cancel stops the remaining closes.
   Editing includes undo/redo, multiple selections, folding,
   indentation, line numbers, wrapping, zoom, find/replace and go to line.
+- **View → Split Right / Split Down** creates nested editor panes, each with its
+  own tabs. Views of the same file share edits, undo, saves and recovery while
+  keeping independent selections, scrolling, wrapping, folding and zoom.
+  The active pane receives find, formatting, symbols and completion commands.
+- **View → Preview Tabs** lets tree and search selections reuse one italic
+  preview tab per pane. Editing, double-clicking the tab or **File → Keep Open**
+  makes it permanent. **File → Reopen Closed Tab** restores recently closed saved
+  files and their positions. See [editor panes and tab workflows](docs/EDITOR_PANES.md)
+  for shortcuts, session restoration and close/reopen policies.
 - **Search → Open Quickly…** searches file paths. **Search Project** finds literal text
   and opens a result at its line and column. Newer queries cancel older work.
 - **Edit → Preferences…** (Alt+,) opens editor preferences. Choose an installed
@@ -110,7 +121,8 @@ for project-local versions, other languages, configuration and limits.
 - Five dark themes are available: **Obsidian, Nord, Midnight, Forest and Ember**.
   Five light themes are available: **Daylight, Linen, Glacier, Rose and Meadow**.
   **View → Color Theme** also changes the theme directly. Window position,
-  open saved files, selections and scroll positions persist between sessions.
+  nested pane layouts, open saved files, selections and scroll positions persist
+  between sessions.
 - Lexilla supplies highlighting for C/C++, Python, JavaScript/TypeScript, HTML,
   JSON, XML, CSS, Java, C#, Rust, shell, SQL, Markdown, YAML, TOML, and more.
   A few related languages use an approximate C-family lexer.
@@ -206,6 +218,10 @@ build-haiku/kiri_language_tests --tools /boot/home/config/settings/Kiri
 Native visual and interaction checks are recorded separately in
 [STATUS.md](docs/STATUS.md). The isolated VM and build workflow is documented in
 [VM.md](docs/VM.md); machine state and SSH keys are ignored by Git.
+
+[Future feature proposals](docs/futures_features/README.md) compare CodeEdit,
+CotEditor and historical Fleet features with Kiri, with individual drafts for
+review before implementation.
 
 ## Dependencies and attribution
 
