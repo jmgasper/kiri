@@ -20,6 +20,7 @@ $(BUILD)/Kiri: $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) resources/Kiri.rdef
 	$(CXX) -o $@.new $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) $(LIBS)
 	rc -o $(BUILD)/Kiri.rsrc resources/Kiri.rdef
 	xres -o $@.new $(BUILD)/Kiri.rsrc
+	mimeset -f $@.new
 	mv $@.new $@
 $(BUILD)/%.o: %.cpp
 	mkdir -p $(dir $@)

@@ -16,7 +16,7 @@ crash recovery, image previews and a 200 MiB document. See the
 Install the package from `artifacts/` on Haiku:
 
 ```sh
-pkgman install ./artifacts/kiri-0.1.0~beta6-1-x86_64.hpkg
+pkgman install ./artifacts/kiri-0.1.0~beta6-4-x86_64.hpkg
 /boot/system/apps/Kiri
 ```
 
@@ -50,7 +50,8 @@ Unavailable items can be removed from the list without deleting files.
 
 Choosing the previous project restores its saved tabs and editor positions.
 Opening a file or folder from Tracker or the command line goes straight to the
-workspace. Unsaved documents from an interrupted session recover immediately.
+workspace. To open a project from Tracker, right-click its folder and choose
+**Open with → Kiri**. Unsaved documents from an interrupted session recover immediately.
 **File → Show Launcher…** brings the launcher back while you work; opening
 another item there preserves your existing tabs. The launcher follows your theme.
 

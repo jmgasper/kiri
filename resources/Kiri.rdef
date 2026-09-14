@@ -10,6 +10,7 @@ resource app_version {
     long_info = "A fast, native project editor for Haiku with Git and an embedded terminal."
 };
 resource file_types message {
+    "types" = "application/x-vnd.Be-directory",
     "types" = "text/plain",
     "types" = "text/x-source-code",
     "types" = "text/x-c++src",
