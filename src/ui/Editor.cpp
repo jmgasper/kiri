@@ -18,8 +18,9 @@ namespace kiri {
 namespace {
 class EditInputFilter:public BMessageFilter {
 public:
-    explicit EditInputFilter(int64& revision):BMessageFilter(B_ANY_DELIVERY,B_ANY_SOURCE),fRevision(revision) {}
+    explicit EditInputFilter(int64& revision,Editor* editor):BMessageFilter(B_ANY_DELIVERY,B_ANY_SOURCE),fRevision(revision),fEditor(editor) {}
     filter_result Filter(BMessage* message,BHandler**) override {
+        if(fEditor->FilterLanguageKey(message)) return B_SKIP_MESSAGE;
         switch(message->what) {
             case B_KEY_DOWN:case B_UNMAPPED_KEY_DOWN:case B_INPUT_METHOD_EVENT:
             case B_CUT:case B_PASTE:case B_UNDO:case B_REDO:case B_SIMPLE_DATA:++fRevision;break;
@@ -27,7 +28,7 @@ public:
         }
         return B_DISPATCH_MESSAGE;
     }
-private:int64& fRevision;
+private:int64& fRevision;Editor* fEditor;
 };
 }
 Editor::Editor():BScintillaView("source",B_FRAME_EVENTS,true,true,B_NO_BORDER) {
@@ -58,7 +59,10 @@ Editor::Editor():BScintillaView("source",B_FRAME_EVENTS,true,true,B_NO_BORDER) {
     SendMessage(SCI_SETINDENTATIONGUIDES,SC_IV_LOOKBOTH);
     SendMessage(SCI_USEPOPUP,0);
     ApplyTheme(fTheme);
-    Target()->AddFilter(new EditInputFilter(fRevision));
+    SendMessage(SCI_AUTOCSETSEPARATOR,'\n');SendMessage(SCI_AUTOCSETTYPESEPARATOR,31);SendMessage(SCI_AUTOCSETORDER,SC_ORDER_CUSTOM);
+    SendMessage(SCI_AUTOCSETMAXHEIGHT,10);SendMessage(SCI_AUTOCSETMAXWIDTH,80);
+    SendMessage(SCI_AUTOCSETCHOOSESINGLE,0);SendMessage(SCI_AUTOCSETAUTOHIDE,0);
+    Target()->AddFilter(new EditInputFilter(fRevision,this));
 }
 void Editor::AllAttached() {
     BScintillaView::AllAttached();
@@ -232,9 +236,55 @@ bool Editor::Matches(std::string_view text) {
     const char* bytes=reinterpret_cast<const char*>(SendMessage(SCI_GETCHARACTERPOINTER));
     return text.empty() || (bytes && memcmp(bytes,text.data(),text.size())==0);
 }
+void Editor::ApplyEdits(const std::vector<TextEdit>& edits,bool preserveLines) {
+    if(SendMessage(SCI_GETREADONLY) || edits.empty()) return;
+    auto ordered=OrderedEdits(edits,SendMessage(SCI_GETLENGTH));
+    auto caret=SendMessage(SCI_GETCURRENTPOS),anchor=SendMessage(SCI_GETANCHOR),first=SendMessage(SCI_GETFIRSTVISIBLELINE);
+    auto before=preserveLines?Text():std::string();
+    auto caretPosition=PositionAt(before,caret),anchorPosition=PositionAt(before,anchor);
+    CancelCompletions();SendMessage(SCI_BEGINUNDOACTION);
+    for(const auto& edit:ordered) {
+        SendMessage(SCI_SETTARGETSTART,edit.start);SendMessage(SCI_SETTARGETEND,edit.end);
+        SendMessage(SCI_REPLACETARGET,edit.text.size(),reinterpret_cast<sptr_t>(edit.text.data()));
+    }
+    SendMessage(SCI_ENDUNDOACTION);
+    if(preserveLines) { auto after=Text();caret=OffsetAt(after,caretPosition);anchor=OffsetAt(after,anchorPosition); }
+    else { caret=MapOffset(caret,edits);anchor=MapOffset(anchor,edits); }
+    SendMessage(SCI_SETSEL,anchor,caret);SendMessage(SCI_SETFIRSTVISIBLELINE,first);
+}
+void Editor::ShowCompletions(const std::vector<std::string>& labels) {
+    CancelCompletions();if(labels.empty()) return;
+    fCompletionLabels=labels;std::string list;
+    for(const auto& label:labels) { if(!list.empty()) list+='\n';list+=label; }
+    SendMessage(SCI_USERLISTSHOW,1,reinterpret_cast<sptr_t>(list.c_str()));
+}
+void Editor::CancelCompletions() { SendMessage(SCI_AUTOCCANCEL);fCompletionLabels.clear(); }
+bool Editor::FilterLanguageKey(BMessage* message) {
+    if(message->what!=B_KEY_DOWN || !Window()) return false;
+    int32 modifiers=0,raw=0;const char* bytes=nullptr;message->FindInt32("modifiers",&modifiers);message->FindInt32("raw_char",&raw);message->FindString("bytes",&bytes);
+    if((raw==' ' || (bytes && bytes[0]==' ')) && (modifiers&B_CONTROL_KEY) && !(modifiers&(B_COMMAND_KEY|B_OPTION_KEY))) {
+        BMessage request(kComplete);request.AddPointer("editor",this);Window()->PostMessage(&request);return true;
+    }
+    if(bytes && bytes[0]==B_ESCAPE) { BMessage request(kCancelCompletion);request.AddPointer("editor",this);Window()->PostMessage(&request); }
+    return false;
+}
 void Editor::NotificationReceived(SCNotification* n) {
     if(!fLoading && n->nmhdr.code==SCN_MODIFIED && (n->modificationType&(SC_MOD_INSERTTEXT|SC_MOD_DELETETEXT))) ++fRevision;
     if(fLoading || !Window()) return;
+    if(n->nmhdr.code==SCN_MODIFIED && (n->modificationType&(SC_MOD_INSERTTEXT|SC_MOD_DELETETEXT))) {
+        BMessage message(kEditorText);message.AddPointer("editor",this);Window()->PostMessage(&message);
+    }
+    if(n->nmhdr.code==SCN_CHARADDED) {
+        BMessage message(kEditorTyped);message.AddPointer("editor",this);message.AddInt32("character",n->ch);Window()->PostMessage(&message);
+    }
+    if(n->nmhdr.code==SCN_USERLISTSELECTION && n->listType==1) {
+        BMessage message(kCompletionChosen);message.AddPointer("editor",this);
+        // The Haiku port copies notification text as bytes without a NUL.
+        const void* bytes=nullptr;ssize_t size=0;auto* current=Window()->CurrentMessage();
+        if(current && current->FindData("notification_text",B_ANY_TYPE,&bytes,&size)==B_OK && size>0) {
+            std::string label(static_cast<const char*>(bytes),size);message.AddString("label",label.c_str());Window()->PostMessage(&message);
+        }
+    }
     if(n->nmhdr.code==SCN_SAVEPOINTLEFT || n->nmhdr.code==SCN_SAVEPOINTREACHED) {
         BMessage msg(kEditorChanged);msg.AddPointer("editor",this);Window()->PostMessage(&msg);
     } else if(n->nmhdr.code==SCN_UPDATEUI) {
@@ -257,12 +307,17 @@ void Editor::NotificationReceived(SCNotification* n) {
 }
 void Editor::ContextMenu(BPoint where) {
     BPopUpMenu menu("Editor");
+    auto* format=new BMessage(kFormatPrettier);format->AddPointer("editor",this);
+    auto* formatItem=new BMenuItem("Format with Prettier",format);formatItem->SetEnabled(!SendMessage(SCI_GETREADONLY));menu.AddItem(formatItem);
+    auto* completion=new BMessage(kComplete);completion->AddPointer("editor",this);
+    auto* completeItem=new BMenuItem("Complete Code",completion);completeItem->SetEnabled(!SendMessage(SCI_GETREADONLY));menu.AddItem(completeItem);
+    menu.AddSeparatorItem();
     menu.AddItem(new BMenuItem("Copy GitHub Permalink",new BMessage(kCopyPermalink)));
     menu.AddItem(new BMenuItem("File History",new BMessage(kFileHistory)));
     menu.AddSeparatorItem();
     menu.AddItem(new BMenuItem("Find…",new BMessage(kFind)));
     menu.AddItem(new BMenuItem("Go to Line…",new BMessage(kGoToLine)));
-    menu.SetTargetForItems(Window());menu.Go(ConvertToScreen(where),true,true);
+    menu.SetTargetForItems(Window());menu.Go(where,true,true);
 }
 bool Editor::Find(const std::string& query,bool backwards,bool matchCase,bool regex) {
     if(query.empty()) return false;

@@ -1,4 +1,4 @@
-# Beta 5 verification record
+# Beta 6 verification record
 
 Verified September 14, 2026 on Haiku R1/beta5 x86_64, hrev57937+113, in
 QEMU/KVM with 4 vCPUs and 4 GiB RAM. Native build: GCC 13.3, Scintilla 5.3.4,
@@ -6,8 +6,9 @@ Lexilla 5.4.6. Portable core also built and tested with Linux GCC 13.3.
 
 ## Automated checks
 
-Beta 5 rebuilt the native application and reran the expanded native suite.
-The unchanged portable core retains its beta 3 test baseline.
+Beta 6 rebuilt the native application and reran the portable and expanded native
+suites. Language integration uses Node.js 20.15.1 on Haiku, Prettier 3.9.6,
+TypeScript 5.9.3, typescript-language-server 4.3.4 and clangd 16.0.6.
 
 - **163 core checks pass on Linux and Haiku.** Coverage includes literal
   subprocess arguments, timeout/cancellation/output limits; UTF-8 boundaries,
@@ -17,7 +18,7 @@ The unchanged portable core retains its beta 3 test baseline.
   and graph lanes; GitHub immutable line/range mapping and boundaries; ignore-aware indexing
   and search; terminal escape handling and real PTY shells including Ctrl+D,
   independent directories and variables, and closing one shell while another runs.
-- **216 native editor, file and worker checks pass.** C++/JSON token styles,
+- **233 native editor, file and worker checks pass.** C++/JSON token styles,
   Unicode navigation, dirty state, undo, current-match and all-match replacement,
   ten themes (five dark and five light), text/syntax contrast, installed font
   selection and size, settings round trips and legacy defaults, invalid settings
@@ -27,10 +28,45 @@ The unchanged portable core retains its beta 3 test baseline.
   checks cover migration from the previous session, persistence, canonical-path
   deduplication, Unicode paths, most-recent ordering, the 24-item limit, malformed
   records, removal without deleting source files, and excluding unsaved drafts.
+  Formatting and completion edits preserve undo/redo and dirty state, apply
+  additional edits atomically, reject overlapping ranges before changing text,
+  preserve read-only buffers and intercept Haiku's Ctrl+Space without inserting NUL.
+- **108 language checks pass on Haiku; 98 on Linux.** These exercise byte-fragmented
+  and combined JSON-RPC frames, invalid headers, Unicode positions and file URIs,
+  literal command arguments, project-local tool selection, configuration round
+  trips, nested and flat symbols, completion edit ranges, server requests,
+  errors, timeouts, cancellation, shutdown and full/incremental synchronization.
+  Real Prettier checks cover unsaved input, project style/ignore rules, syntax
+  errors and unchanged disk contents. Real TypeScript checks cover symbols,
+  completion resolution and changed unsaved text. Haiku also exercises C++
+  completion and symbols through clangd, using the same client.
 - The native performance fixture adds checks for the 200 MiB document's byte
   and line counts and a 100,001-file index. See [measurements](PERFORMANCE.md).
 
 ## Observed native interaction
+
+Beta 6 used an isolated workspace and settings directory beside the existing
+user sessions. **Format with Prettier** in the editor's actual right-click menu
+formatted JavaScript using the project's single-quote/no-semicolon settings.
+The editor became dirty while the disk file remained unchanged; one Undo
+restored the exact original text and clean state.
+
+A delayed Prettier process completed after new text was typed. Its result was
+rejected and the new text remained intact. Closing its target tab while a result
+was pending retained the other file without reopening or replacing either tab.
+
+The TypeScript symbol bar displayed ten symbols including a class, constructor,
+method, function, constants and properties. Selecting `greet` moved the caret
+to byte 84, its declaration. **Ctrl+Space** after `user.na` displayed `name`, and
+Tab inserted `user.name` with zero NUL bytes. Enter acceptance also worked.
+Typing `user.` displayed `age` and `name` automatically; Down and Tab selected
+and inserted `name`. Undo restored the incomplete text in one step.
+The native Language Tools dialog switched profiles and persisted the Prettier
+command with automatic suggestions enabled.
+In the final build, invoking Complete Code from the Edit menu while the terminal
+had focus returned focus to the editor and inserted the selected property.
+Go to Symbol from the Git workspace revealed the file; selecting `greet` again
+reached byte 84 without changing its text.
 
 Beta 5's isolated application instance used the production startup flow. A
 normal launch showed only the launcher. Native folder and file pickers opened
@@ -114,7 +150,9 @@ remain separate measurement work. Native CMake builds are supplied but the
 tested release build uses the Makefile.
 
 Screenshots show the [launcher](screenshots/launcher.png) in dark and
-[light](screenshots/launcher-light.png) themes, [editor preferences](screenshots/preferences.png), the
+[light](screenshots/launcher-light.png) themes, [Prettier](screenshots/prettier.png),
+[code completion](screenshots/code-completion.png), [file symbols](screenshots/file-symbols.png),
+[language tools](screenshots/language-tools.png), [editor preferences](screenshots/preferences.png), the
 [ten-theme menu](screenshots/preferences-themes.png), the [workspace](screenshots/workspace.png),
 [Git history and diff](screenshots/git.png), [image preview](screenshots/image.png)
 and [Daylight theme](screenshots/daylight.png) in the running Haiku application.

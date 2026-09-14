@@ -5,6 +5,8 @@
 #include "ui/Async.h"
 #include "ui/Theme.h"
 #include "ui/EditorSettings.h"
+#include "core/LanguageTools.h"
+#include "core/LanguageServer.h"
 #include <Window.h>
 #include <memory>
 #include <set>
@@ -15,7 +17,7 @@ class BFilePanel;class BCardLayout;class BSplitView;class BStringView;
 class BTextControl;class BCheckBox;class BMessageRunner;
 class BMenuBar;
 namespace kiri {
-class Editor;class Explorer;class GitView;class TerminalPanel;class TabStrip;class RefreshButton;
+class Editor;class Explorer;class GitView;class TerminalPanel;class TabStrip;class RefreshButton;class SymbolBar;
 class Workspace:public BWindow {
 public:
     explicit Workspace(const std::string& settingsDirectory={},bool restoreSession=true);
@@ -35,6 +37,11 @@ private:
         std::string recoveryFile;
         int64 recoveryRevision=-1,lastRecovery=0;
         bool recovering=false;
+        std::string serverKey,serverURI,serverText,serverLanguage,languageStatus,symbolError;
+        int serverVersion=0,symbolVersion=-1;
+        int64 symbolRequest=0,completionRequest=0,textChangedAt=0,formatSerial=0;
+        bool languageDirty=true;
+        std::vector<DocumentSymbol> symbols;
     };
     Document* Current();
     Document* ByID(int64 id);
@@ -70,12 +77,38 @@ private:
     void ClearRecovery(Document& document);
     void Pulse();
     void Notice(const std::string& text);
+    void FormatDocument(Editor* source);
+    void ShowLanguageTools();
+    void ResetLanguages();
+    void CloseLanguage(Document& document);
+    void LanguageTick();
+    LanguageServer* EnsureLanguage(Document& document);
+    bool SyncLanguage(Document& document,LanguageServer& server);
+    void RequestSymbols(Document& document,LanguageServer& server);
+    void UpdateSymbolBar();
+    void Complete(Editor* source,bool manual=true,int character=0);
+    void AcceptCompletion(Editor* source,const std::string& label);
+    void ApplyCompletion(int64 document,int64 serial,CompletionItem item);
+    void CancelCompletion();
     std::unique_ptr<AsyncQueue> fJobs;
     std::unique_ptr<Editor> fLoaderFactory;
     std::unique_ptr<AsyncQueue> fRecoveryJobs;
     std::unique_ptr<BFilePanel> fFolderPanel,fOpenPanel,fSavePanel;
     std::unique_ptr<BMessageRunner> fPulse;
     std::unique_ptr<BMessageRunner> fRecoveryTimer;
+    std::unique_ptr<BMessageRunner> fLanguageTimer;
+    struct ServerEntry { std::unique_ptr<LanguageServer> client;std::string status; };
+    std::map<std::string,ServerEntry> fServers;
+    LanguageTools fLanguageTools;
+    BMessenger fLanguageToolsWindow;
+    int64 fLanguageGeneration=0,fCompletionSerial=0,fCompletionDocument=0,fCompletionAt=0;
+    int64 fCompletionCaret=0,fCompletionWordStart=0;
+    std::string fCompletionText;
+    std::vector<CompletionItem> fCompletions;
+    std::vector<std::string> fCompletionLabels;
+    int64 fTypedDocument=0,fTypedAt=0;
+    int fTypedCharacter=0;
+    SymbolBar* fSymbolBar;
     struct Snapshot { int64 id,revision;size_t total,offset=0;std::shared_ptr<Draft> draft; };
     std::unique_ptr<Snapshot> fSnapshot;
     std::vector<std::unique_ptr<Document>> fDocuments;

@@ -6,8 +6,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 add_library(kiri_core
     src/core/Process.cpp src/core/Git.cpp src/core/FileIO.cpp
-    src/core/Project.cpp src/core/Terminal.cpp src/core/Recovery.cpp)
-target_include_directories(kiri_core PUBLIC src)
+    src/core/Project.cpp src/core/Terminal.cpp src/core/Recovery.cpp
+    src/core/LanguageTools.cpp src/core/LanguageProtocol.cpp src/core/LanguageServer.cpp)
+target_include_directories(kiri_core PUBLIC src vendor)
 target_compile_options(kiri_core PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(kiri_core PUBLIC Threads::Threads)
 
@@ -22,6 +23,9 @@ if(BUILD_TESTING)
     add_executable(kiri_tests tests/CoreTests.cpp)
     target_link_libraries(kiri_tests PRIVATE kiri_core)
     add_test(NAME kiri_core COMMAND kiri_tests)
+    add_executable(kiri_language_tests tests/LanguageTests.cpp)
+    target_link_libraries(kiri_language_tests PRIVATE kiri_core)
+    add_test(NAME kiri_language COMMAND kiri_language_tests)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
@@ -34,7 +38,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
         src/ui/PreviewView.cpp src/ui/GitView.cpp src/ui/TabStrip.cpp
         src/ui/TerminalPanel.cpp src/ui/RefreshButton.cpp
         src/ui/EditorSettings.cpp src/ui/PreferencesWindow.cpp src/ui/FileIcons.cpp
-        src/ui/Application.cpp src/ui/LauncherWindow.cpp src/ui/RecentItems.cpp)
+        src/ui/Application.cpp src/ui/LauncherWindow.cpp src/ui/RecentItems.cpp
+        src/ui/WorkspaceLanguage.cpp src/ui/SymbolBar.cpp src/ui/LanguageToolsWindow.cpp)
     add_executable(Kiri src/main.cpp ${KIRI_UI_SOURCES})
     target_include_directories(Kiri PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
     target_compile_options(Kiri PRIVATE -Wall -Wextra -Wno-multichar)
@@ -64,6 +69,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
     install(DIRECTORY docs DESTINATION documentation/packages/kiri)
     install(FILES vendor/libvterm/LICENSE vendor/libvterm/UPSTREAM.md
         DESTINATION documentation/packages/kiri/vendor/libvterm)
+    install(FILES vendor/nlohmann/LICENSE.MIT vendor/nlohmann/UPSTREAM.md
+        DESTINATION documentation/packages/kiri/vendor/nlohmann)
+    install(PROGRAMS tools/install-language-tools.sh DESTINATION documentation/packages/kiri/tools)
 else()
     message(STATUS "Host build: portable core and tests. Build on Haiku for the native UI.")
 endif()

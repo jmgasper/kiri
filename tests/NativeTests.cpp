@@ -111,6 +111,23 @@ static void Icons() {
     CHECK(FileIcon("one",true) && FileIcon("one",true)==FileIcon("two",true));
     CHECK(FileIcon("unknown.kiri-test-extension"));
 }
+static void LanguageEdits(Editor* editor) {
+    std::string before="const user={name:\"Kiri\"};\n😀\n",formatted="const user = { name: 'Kiri' }\n😀\n";
+    editor->SetText(before);editor->SendMessage(SCI_SETSEL,6,10);
+    editor->ApplyEdits({{0,before.size(),formatted}},true);
+    CHECK(editor->Text()==formatted);CHECK(editor->Dirty());CHECK(editor->SendMessage(SCI_GETANCHOR)==6);CHECK(editor->SendMessage(SCI_GETCURRENTPOS)==10);
+    editor->SendMessage(SCI_UNDO);CHECK(editor->Text()==before);CHECK(!editor->Dirty());
+    editor->SendMessage(SCI_REDO);CHECK(editor->Text()==formatted);
+    before="const result = user.na;\n";editor->SetText(before);editor->SendMessage(SCI_SETSEL,22,22);
+    std::vector<TextEdit> edits={{20,22,"name"},{0,0,"// imported user\n"}};
+    editor->ApplyEdits(edits);CHECK(editor->Text()=="// imported user\nconst result = user.name;\n");CHECK(editor->SendMessage(SCI_GETCURRENTPOS)==41);
+    editor->SendMessage(SCI_UNDO);CHECK(editor->Text()==before);CHECK(!editor->Dirty());
+    bool rejected=false;try { editor->ApplyEdits({{0,6,"x"},{3,10,"y"}}); }catch(const std::exception&) { rejected=true; }
+    CHECK(rejected);CHECK(editor->Text()==before);CHECK(!editor->Dirty());
+    editor->SetText(before,true);editor->ApplyEdits({{0,before.size(),"changed"}});CHECK(editor->Text()==before);editor->SetText("");
+    BMessage complete(B_KEY_DOWN);complete.AddInt32("modifiers",B_CONTROL_KEY);complete.AddInt32("raw_char",32);complete.AddString("bytes","");
+    CHECK(editor->FilterLanguageKey(&complete));CHECK(editor->Text().empty());
+}
 static void Fixtures(const std::string& root) {
     if(fs::exists(root)) throw std::runtime_error("Fixture directory must be new.");
     fs::create_directories(root);
@@ -167,7 +184,7 @@ int main(int argc,char** argv) {
         editor->SetText("{\"key\": true, \"n\": 42}\n");editor->SetLanguage("test.json");editor->SendMessage(SCI_COLOURISE,0,-1);
         CHECK(editor->SendMessage(SCI_GETSTYLEAT,3)==SCE_JSON_PROPERTYNAME);CHECK(editor->SendMessage(SCI_GETSTYLEAT,8)==SCE_JSON_KEYWORD);
         editor->MarkRecovered();CHECK(editor->Dirty());editor->MarkSaved();CHECK(!editor->Dirty());
-        Preferences(editor);Icons();Recents();
+        Preferences(editor);Icons();Recents();LanguageEdits(editor);
         auto loader=editor->CreateLoader(true);CHECK(loader->loader);
         std::thread loading([&]{CHECK(loader->loader->AddData("first\r\nsecond\r\n",15)==SC_STATUS_OK);});loading.join();editor->Adopt(*loader,0);
         CHECK(editor->Text()=="first\r\nsecond\r\n");CHECK(editor->SendMessage(SCI_GETLINECOUNT)==3);CHECK(!editor->Dirty());CHECK(editor->SendMessage(SCI_GETDOCUMENTOPTIONS)&SC_DOCUMENTOPTION_STYLES_NONE);

@@ -11,6 +11,9 @@ in native C++ using Haiku's Interface Kit. No browser or web application runtime
 | Source editing | Edit, save, reopen, undo/redo, select, clipboard, tabs, dirty-close protection, Unicode and line-ending preservation. |
 | Syntax highlighting | Native lexers for popular languages and HTML, JSON, XML; rendered checks of representative files. |
 | Line numbers | Visible, aligned gutter and accurate cursor/line navigation. |
+| Prettier formatting | Right-click action formats the unsaved buffer using project settings; one Undo; safe rejection after edits or closing its tab. |
+| LSP completion | Real language servers provide suggestions in the editor; keyboard acceptance applies their edit ranges correctly, including Unicode. |
+| File symbol browsing | A bar above the active file lists variables, fields, methods and functions supplied by LSP and jumps to their declarations. |
 | Themes and dark UI | Select light/dark color themes affecting all app-owned surfaces; persist preference. |
 | Embedded terminal | Real PTY and terminal emulation; interactive shell, colors, resize, Ctrl-C, scrollback and full-screen programs inside the editor. |
 | Git history and graph | Browse all reachable history with pagination, branch/merge graph, metadata, commit changes and file history. |
@@ -26,7 +29,7 @@ session recovery, file-change detection, keyboard navigation and zoom.
 
 ## Design direction
 
-Compact project toolbar, resizable file sidebar, tabbed content, a docked
+Compact menus, a file symbol bar, resizable file sidebar, tabbed content, a docked
 terminal and separate source-control workspace. Native controls and focused
 custom drawing for document tabs, terminal cells and commit lanes.
 

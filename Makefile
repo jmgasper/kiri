@@ -2,7 +2,7 @@
 CXX ?= g++
 CC ?= gcc
 BUILD ?= build-haiku
-CPPFLAGS += -Isrc -Ivendor/libvterm/include -I/boot/system/develop/headers/scintilla -I/boot/system/develop/headers/lexilla
+CPPFLAGS += -Isrc -Ivendor -Ivendor/libvterm/include -I/boot/system/develop/headers/scintilla -I/boot/system/develop/headers/lexilla
 CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++17 -Wall -Wextra -Wno-multichar -Wno-misleading-indentation
 CFLAGS ?= -O2
@@ -14,7 +14,7 @@ CORE_OBJ = $(CORE:%.cpp=$(BUILD)/%.o)
 UI_OBJ = $(UI:%.cpp=$(BUILD)/%.o)
 VTERM_OBJ = $(VTERM:%.c=$(BUILD)/%.o)
 LIBS = -lbe -ltracker -ltranslation -lscintilla -llexilla
-.PHONY: all check check-native workspace-smoke launcher-smoke package clean
+.PHONY: all check check-native check-language workspace-smoke launcher-smoke package clean
 all: $(BUILD)/Kiri
 $(BUILD)/Kiri: $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) resources/Kiri.rdef
 	$(CXX) -o $@.new $(CORE_OBJ) $(UI_OBJ) $(VTERM_OBJ) $(LIBS)
@@ -31,6 +31,10 @@ $(BUILD)/kiri_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/tests/CoreTests.o
 	$(CXX) -o $@ $^ -lbe
 check: $(BUILD)/kiri_tests
 	$(BUILD)/kiri_tests
+$(BUILD)/kiri_language_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/tests/LanguageTests.o
+	$(CXX) -o $@ $^ -lbe
+check-language: $(BUILD)/kiri_language_tests
+	$(BUILD)/kiri_language_tests
 $(BUILD)/kiri_native_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/src/ui/Editor.o $(BUILD)/src/ui/Theme.o $(BUILD)/src/ui/EditorSettings.o $(BUILD)/src/ui/FileIcons.o $(BUILD)/src/ui/RecentItems.o $(BUILD)/tests/NativeTests.o
 	$(CXX) -o $@ $^ $(LIBS)
 check-native: $(BUILD)/kiri_native_tests
@@ -47,4 +51,4 @@ package: all
 	bash tools/package-haiku.sh
 clean:
 	rm -rf $(BUILD)
--include $(CORE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(VTERM_OBJ:.o=.d) $(BUILD)/tests/CoreTests.d $(BUILD)/tests/NativeTests.d $(BUILD)/tests/WorkspaceSmoke.d $(BUILD)/tests/LauncherSmoke.d
+-include $(CORE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(VTERM_OBJ:.o=.d) $(BUILD)/tests/CoreTests.d $(BUILD)/tests/NativeTests.d $(BUILD)/tests/WorkspaceSmoke.d $(BUILD)/tests/LauncherSmoke.d $(BUILD)/tests/LanguageTests.d

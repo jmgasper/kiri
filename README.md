@@ -4,7 +4,7 @@ A native C++ project editor for Haiku, with a file tree, source editing, an
 embedded terminal and a Git workspace. Kiri uses Haiku's Interface Kit,
 Scintilla, Lexilla and libvterm. There is no browser or web UI runtime.
 
-**0.1.0 beta 5** builds and runs on Haiku R1/beta5 x86_64. The application has
+**0.1.0 beta 6** builds and runs on Haiku R1/beta5 x86_64. The application has
 been exercised in QEMU/KVM, including real editing, staging and committing,
 crash recovery, image previews and a 200 MiB document. See the
 [verification record](docs/STATUS.md) and [performance measurements](docs/PERFORMANCE.md).
@@ -16,7 +16,7 @@ crash recovery, image previews and a 200 MiB document. See the
 Install the package from `artifacts/` on Haiku:
 
 ```sh
-pkgman install ./artifacts/kiri-0.1.0~beta5-1-x86_64.hpkg
+pkgman install ./artifacts/kiri-0.1.0~beta6-1-x86_64.hpkg
 /boot/system/apps/Kiri
 ```
 
@@ -29,7 +29,7 @@ To build from source on Haiku:
 ```sh
 pkgman install gcc make scintilla_devel lexilla_devel git
 make -j4
-make check check-native
+make check check-native check-language
 ./build-haiku/Kiri /path/to/project
 make package
 ```
@@ -55,6 +55,30 @@ workspace. Unsaved documents from an interrupted session recover immediately.
 another item there preserves your existing tabs. The launcher follows your theme.
 
 ![Kiri's launcher](docs/screenshots/launcher.png)
+
+## Formatting and language tools
+
+Right-click source text for **Format with Prettier**. Formatting uses unsaved
+text and project settings, creates one undo step, and leaves saving to you.
+**Ctrl+Space** or **Complete Code** requests language-server suggestions;
+suggestions also appear while typing. Choose with Up/Down and Enter or Tab.
+
+The **Symbols** bar above each file lists variables, fields, classes, methods
+and functions and jumps to their declarations. It follows the active file and
+updates from unsaved text. **Edit → Language Tools…** configures Prettier,
+language-server commands and automatic suggestions.
+
+```sh
+pkgman install nodejs20 npm
+bash tools/install-language-tools.sh
+pkgman install llvm16_clang   # clangd for C and C++
+```
+
+The setup script installs Prettier and JavaScript, TypeScript, HTML, CSS and
+JSON servers in Kiri's settings directory. See the [language tools guide](docs/LANGUAGE_TOOLS.md)
+for project-local versions, other languages, configuration and limits.
+
+![Language-server code completion](docs/screenshots/code-completion.png)
 
 ## Workspace
 
@@ -149,7 +173,7 @@ details and reproduction commands in [PERFORMANCE.md](docs/PERFORMANCE.md).
 - The tree loads directories individually. A single directory with an extreme
   number of direct children and very long text lines need further measurement.
 - Terminal selection covers whole rows. PDF/video viewers, text-encoding
-  conversion, LSP completion, debugging and an extension system are outside this beta.
+  conversion, debugging and an extension system are outside this beta.
 - Git remote authentication uses existing credentials; there is no login dialog
   or interactive merge-conflict editor.
 
@@ -165,7 +189,15 @@ cmake --build build-host -j8
 ctest --test-dir build-host --output-on-failure
 ```
 
-The current suites pass **163 core checks** and **190 Haiku editor/file/worker checks**.
+The current suites pass **163 core checks** and **233 Haiku editor/file/worker checks**.
+Language checks include real Prettier and TypeScript servers: **98 checks** on
+Linux and **108 on Haiku**, where clangd C++ completion and symbols are also exercised:
+
+```sh
+make check-language
+build-haiku/kiri_language_tests --tools /boot/home/config/settings/Kiri
+```
+
 Native visual and interaction checks are recorded separately in
 [STATUS.md](docs/STATUS.md). The isolated VM and build workflow is documented in
 [VM.md](docs/VM.md); machine state and SSH keys are ignored by Git.
@@ -176,6 +208,8 @@ Kiri is MIT-licensed. Scintilla and Lexilla are system libraries under the
 [Scintilla license](https://www.scintilla.org/License.txt).
 Unmodified libvterm 0.3.3 is vendored under its MIT license; see
 [the pinned source](vendor/libvterm/UPSTREAM.md) and [license](vendor/libvterm/LICENSE).
+JSON for Modern C++ 3.12.0 is also vendored under MIT; see its
+[pinned source](vendor/nlohmann/UPSTREAM.md) and [license](vendor/nlohmann/LICENSE.MIT).
 
 The workspace organization takes inspiration from
 [Nova](https://help.nova.app/projects/workspace/) and Xcode. Kiri uses its own UI;

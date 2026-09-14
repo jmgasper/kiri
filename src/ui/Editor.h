@@ -2,6 +2,7 @@
 #include <ScintillaView.h>
 #include "ui/Theme.h"
 #include "ui/EditorSettings.h"
+#include "core/LanguageProtocol.h"
 #include <string>
 #include <ILoader.h>
 #include <memory>
@@ -26,6 +27,10 @@ public:
     void Adopt(EditorLoader& loader,int eol=2);
     std::string Text();
     bool Matches(std::string_view text);
+    void ApplyEdits(const std::vector<TextEdit>& edits,bool preserveLines=false);
+    void ShowCompletions(const std::vector<std::string>& labels);
+    void CancelCompletions();
+    bool FilterLanguageKey(BMessage* message);
     bool Dirty() { return fRecovered || SendMessage(SCI_GETMODIFY)!=0; }
     void MarkRecovered() { fRecovered=true;++fRevision; }
     void MarkSaved() { fRecovered=false;SendMessage(SCI_SETSAVEPOINT); }
@@ -44,5 +49,6 @@ private:
     bool fLoading=false,fRecovered=false;
     int fDigits=0;
     int64 fRevision=0;
+    std::vector<std::string> fCompletionLabels;
 };
 }

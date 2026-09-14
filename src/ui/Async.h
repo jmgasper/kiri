@@ -76,6 +76,12 @@ public:
         fWake.notify_one();
     }
     void Cancel(const std::string& key) { std::lock_guard<std::mutex> lock(fMutex);CancelLocked(key); }
+    // Deliver results from persistent services without tying up a worker.
+    // The workspace's language tick also drains results if its port was full.
+    void Post(Callback callback) {
+        { std::lock_guard<std::mutex> lock(fMutex);if(fStop) return;fDone.push_back(std::move(callback)); }
+        BMessage message(kWorkDone);fTarget.SendMessage(&message,static_cast<BHandler*>(nullptr),1000);
+    }
     void Drain() {
         std::deque<Callback> done;
         { std::lock_guard<std::mutex> lock(fMutex);done.swap(fDone); }

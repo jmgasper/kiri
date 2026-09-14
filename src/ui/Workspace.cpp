@@ -1,4 +1,5 @@
 #include "ui/Workspace.h"
+#include "ui/SymbolBar.h"
 #include "ui/Editor.h"
 #include "ui/Explorer.h"
 #include "ui/GitView.h"
@@ -150,6 +151,7 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession):B
     BPath settings;find_directory(B_USER_SETTINGS_DIRECTORY,&settings);settings.Append("Kiri");
     fSettings=settingsDirectory.empty()?settings.Path():settingsDirectory;create_directory(fSettings.c_str(),0755);
     RecentItems(fSettings).Load();
+    fLanguageTools.Load(fSettings);
     fJobs=std::make_unique<AsyncQueue>(BMessenger(this),2);
     fLoaderFactory=std::make_unique<Editor>();
     fRecoveryDirectory=fSettings+"/recovery";create_directory(fRecoveryDirectory.c_str(),0700);
@@ -177,7 +179,8 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession):B
         .Add(new BButton("previous","‹",new BMessage(kFindPrevious))).Add(new BButton("next","›",new BMessage(kFindNext)))
         .Add(new BButton("replace all","All",new BMessage(kReplaceAll))).Add(new BButton("hide find","×",new BMessage(kFind)));
     auto* editorPanel=new BView("editor panel",0);
-    BLayoutBuilder::Group<>(editorPanel,B_VERTICAL,0).Add(fTabs).Add(fFindBar).Add(documentHost);
+    fSymbolBar=new SymbolBar();
+    BLayoutBuilder::Group<>(editorPanel,B_VERTICAL,0).Add(fTabs).Add(fSymbolBar).Add(fFindBar).Add(documentHost);
     fFindBar->Hide();
     fGit=new GitView();auto* modes=new BView("workspace modes",0);fModeLayout=new BCardLayout();modes->SetLayout(fModeLayout);fModeLayout->AddView(editorPanel);fModeLayout->AddView(fGit);
     fTerminal=new TerminalPanel();
@@ -193,9 +196,15 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession):B
     ResizeTo(1195,685);
     RestoreSettings(restoreSession);ApplyTheme(fEditorSettings.theme);
     BMessage pulse(kPulse);fPulse=std::make_unique<BMessageRunner>(BMessenger(this),&pulse,2000000);
+    BMessage languages(kLanguageTick);fLanguageTimer=std::make_unique<BMessageRunner>(BMessenger(this),&languages,150000);
     if(fTerminal->Empty()) NewTerminal(false);
 }
-Workspace::~Workspace() { if(fPreferencesWindow.IsValid()) fPreferencesWindow.SendMessage(B_QUIT_REQUESTED);fPulse.reset();fRecoveryTimer.reset();fRecoveryJobs.reset();fJobs.reset(); }
+Workspace::~Workspace() {
+    if(fPreferencesWindow.IsValid()) fPreferencesWindow.SendMessage(B_QUIT_REQUESTED);
+    if(fLanguageToolsWindow.IsValid()) fLanguageToolsWindow.SendMessage(B_QUIT_REQUESTED);
+    fLanguageTimer.reset();for(auto& entry:fServers) if(entry.second.client) entry.second.client->Stop();fServers.clear();
+    fPulse.reset();fRecoveryTimer.reset();fRecoveryJobs.reset();fJobs.reset();
+}
 
 BMenuBar* Workspace::BuildMenus() {
     auto* bar=new BMenuBar("menu");
@@ -207,11 +216,13 @@ BMenuBar* Workspace::BuildMenus() {
     };
     auto* file=new BMenu("File");add(file,"New File",kNewFile,'N');add(file,"Open File…",kOpenFile,'O');add(file,"Open Folder…",kOpenProject,'O',B_SHIFT_KEY);add(file,"Show Launcher…",kShowLauncher);file->AddSeparatorItem();
     add(file,"Save",kSave,'S');add(file,"Save As…",kSaveAs,'S',B_SHIFT_KEY);add(file,"Save All",kSaveAll);add(file,"Close Tab",kCloseTab,'W');file->AddSeparatorItem();add(file,"Quit",B_QUIT_REQUESTED,'Q');bar->AddItem(file);
-    auto* edit=new BMenu("Edit");add(edit,"Undo",B_UNDO,'Z');add(edit,"Redo",B_REDO,'Z',B_SHIFT_KEY);edit->AddSeparatorItem();add(edit,"Cut",B_CUT,'X');add(edit,"Copy",B_COPY,'C');add(edit,"Paste",B_PASTE,'V');add(edit,"Select All",B_SELECT_ALL,'A');edit->AddSeparatorItem();add(edit,"Preferences…",kShowPreferences,',');bar->AddItem(edit);
+    auto* edit=new BMenu("Edit");add(edit,"Undo",B_UNDO,'Z');add(edit,"Redo",B_REDO,'Z',B_SHIFT_KEY);edit->AddSeparatorItem();add(edit,"Cut",B_CUT,'X');add(edit,"Copy",B_COPY,'C');add(edit,"Paste",B_PASTE,'V');add(edit,"Select All",B_SELECT_ALL,'A');edit->AddSeparatorItem();
+    add(edit,"Format with Prettier",kFormatPrettier);add(edit,"Complete Code",kComplete);add(edit,"Language Tools…",kShowLanguageTools);
+    edit->AddSeparatorItem();add(edit,"Preferences…",kShowPreferences,',');bar->AddItem(edit);
     auto* view=new BMenu("View");add(view,"Show / Hide Files",kToggleSidebar,'B');add(view,"Show / Hide Terminal",kToggleTerminal,'`');add(view,"Source Control",kToggleGit,'G',B_SHIFT_KEY);view->AddSeparatorItem();
     fThemes=ThemeMenu("Color Theme",kTheme,0);fThemes->SetLabelFromMarked(false);
     view->AddItem(fThemes);add(view,"Zoom In",kZoomIn,'+');add(view,"Zoom Out",kZoomOut,'-');add(view,"Word Wrap",kWrap);add(view,"Show Whitespace",kShowWhitespace);bar->AddItem(view);
-    auto* search=new BMenu("Search");add(search,"Find / Replace",kFind,'F');add(search,"Find Next",kFindNext);add(search,"Find Previous",kFindPrevious);add(search,"Open Quickly…",kQuickOpen,'P');add(search,"Search Project…",kProjectSearch,'F',B_SHIFT_KEY);add(search,"Go to Line…",kGoToLine,'G');bar->AddItem(search);
+    auto* search=new BMenu("Search");add(search,"Find / Replace",kFind,'F');add(search,"Find Next",kFindNext);add(search,"Find Previous",kFindPrevious);add(search,"Open Quickly…",kQuickOpen,'P');add(search,"Search Project…",kProjectSearch,'F',B_SHIFT_KEY);add(search,"Go to Line…",kGoToLine,'G');add(search,"Go to Symbol…",kBrowseSymbols,'R',B_SHIFT_KEY);bar->AddItem(search);
     auto* git=new BMenu("Git");add(git,"Show Source Control",kToggleGit);add(git,"File History",kFileHistory);add(git,"Copy GitHub Permalink",kCopyPermalink,'L',B_SHIFT_KEY);git->AddSeparatorItem();add(git,"Refresh",kGitRefresh);add(git,"Fetch",kGitFetch);add(git,"Pull (Fast-forward Only)",kGitPull);add(git,"Push",kGitPush);bar->AddItem(git);
     auto* term=new BMenu("Terminal");add(term,"New Terminal",kNewTerminal,'T',B_SHIFT_KEY);add(term,"Close Terminal",kCloseTerminal);term->AddSeparatorItem();add(term,"Show / Hide",kToggleTerminal);bar->AddItem(term);
     return bar;
@@ -240,9 +251,9 @@ void Workspace::UpdateStatus() {
 }
 void Workspace::SelectTab(int index) {
     if(index<0 || index>=static_cast<int>(fDocuments.size())) return;
-    ++fFocusSerial;
+    CancelCompletion();++fFocusSerial;
     fSelected=index;fModeLayout->SetVisibleItem(int32(0));fDocumentsLayout->SetVisibleItem(index+1);
-    if(fDocuments[index]->editor) fDocuments[index]->editor->MakeFocus();UpdateTabs();
+    if(fDocuments[index]->editor) fDocuments[index]->editor->MakeFocus();UpdateTabs();UpdateSymbolBar();
 }
 void Workspace::NewFile() {
     auto document=std::make_unique<Document>();document->id=fNextID++;document->name="Untitled "+std::to_string(document->id);
@@ -270,6 +281,7 @@ void Workspace::OpenProject(const std::string& input) {
     if(!fs::is_directory(path,error)) { Notice("Cannot open that folder.");return; }
     if(!fRestoring) RememberRecent(path,true);
     bool changed=fProject!=path;
+    if(changed) ResetLanguages();
     fProject=path;++fGeneration;fIndex=std::make_shared<ProjectIndex>();fGitRoot.clear();fExplorer->Clear();fGit->SetRepository("");
     SetTitle((fs::path(path).filename().string()+" — Kiri").c_str());
     Notice("Opening project…");auto generation=fGeneration;
@@ -396,11 +408,13 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
             if(!error.empty()) {
                 document->closeAfterSave=false;fQuitWhenSaved=false;fSaveQueue.clear();fCloseQueue.clear();Notice(error);(new BAlert("Save File",error.c_str(),"OK"))->Go();return;
             }
+            if(document->path!=path) CloseLanguage(*document);
             document->path=path;document->name=fs::path(path).filename().string();document->stamp=stamp;document->external=false;
             RememberRecent(path,false);
             std::string_view saved(*text);if(document->bom) saved.remove_prefix(3);
             if(document->editor->Matches(saved)) { document->editor->MarkSaved();ClearRecovery(*document); }
             document->editor->SetLanguage(path,stamp.size>8*1024*1024);UpdateTabs();SaveSettings();
+            if(auto* server=EnsureLanguage(*document);server && server->Ready()) { SyncLanguage(*document,*server);server->Save(document->serverURI,std::string(saved)); }
             if(document->closeAfterSave) {
                 document->closeAfterSave=false;
                 for(size_t i=0;i<fDocuments.size();++i) if(fDocuments[i]->id==id) { CloseTab(i);break; }
@@ -434,8 +448,9 @@ bool Workspace::CloseTab(int index) {
         if(choice==2) { d->closeAfterSave=true;Save(d);return false; }
     }
     ClearRecovery(*d);
+    CloseLanguage(*d);fJobs->Cancel("format-"+std::to_string(d->id));
     BView* view=d->view;fDocumentsLayout->RemoveView(view);view->RemoveSelf();delete view;fDocuments.erase(fDocuments.begin()+index);
-    if(fDocuments.empty()) { fSelected=-1;fDocumentsLayout->SetVisibleItem(int32(0));UpdateTabs(); }
+    if(fDocuments.empty()) { fSelected=-1;fDocumentsLayout->SetVisibleItem(int32(0));UpdateTabs();UpdateSymbolBar(); }
     else SelectTab(std::clamp(fSelected-(index<fSelected?1:0),0,static_cast<int>(fDocuments.size())-1));
     SaveSettings();return true;
 }
@@ -482,7 +497,7 @@ void Workspace::ApplyTheme(int index) {
     auto* filesTitle=static_cast<BStringView*>(FindView("files title"));
     BSize titleSize(filesTitle->StringWidth(filesTitle->Text())+2,B_SIZE_UNSET);
     filesTitle->SetExplicitMinSize(titleSize);filesTitle->SetExplicitMaxSize(titleSize);
-    fExplorer->ApplyTheme(theme);fRefresh->ApplyTheme(theme);fTabs->ApplyTheme(theme);fTerminal->ApplyTheme(theme);fGit->ApplySettings(fEditorSettings);
+    fExplorer->ApplyTheme(theme);fRefresh->ApplyTheme(theme);fTabs->ApplyTheme(theme);fTerminal->ApplyTheme(theme);fGit->ApplySettings(fEditorSettings);fSymbolBar->ApplyTheme(theme);
     for(auto& d:fDocuments) {
         if(d->editor) d->editor->ApplySettings(fEditorSettings);
         if(auto* preview=dynamic_cast<PreviewView*>(d->view)) preview->ApplyTheme(theme);
@@ -674,6 +689,50 @@ void Workspace::MessageReceived(BMessage* message) {
         int32 index=fSelected;message->FindInt32("index",&index);return static_cast<int>(index);
     };
     switch(message->what) {
+        case kLanguageTick:LanguageTick();break;
+        case kShowLanguageTools:ShowLanguageTools();break;
+        case kApplyLanguageTools: {
+            auto error=fLanguageTools.Load(fSettings);
+            if(error.empty()) { ResetLanguages();UpdateSymbolBar(); }else Notice(error);
+            break;
+        }
+        case kFormatPrettier:case kComplete:case kCompletionChosen: {
+            void* source=nullptr;if(message->FindPointer("editor",&source)!=B_OK) source=editor;
+            Editor* target=nullptr;for(auto& document:fDocuments) if(document->editor==source) target=document->editor;
+            if(message->what==kFormatPrettier) FormatDocument(target);
+            else if(message->what==kComplete) Complete(target);
+            else { const char* label;if(message->FindString("label",&label)==B_OK) AcceptCompletion(target,label); }
+            break;
+        }
+        case kCancelCompletion:CancelCompletion();break;
+        case kEditorText:case kEditorTyped: {
+            void* source=nullptr;message->FindPointer("editor",&source);
+            for(auto& document:fDocuments) if(document->editor==source) {
+                if(message->what==kEditorText) {
+                    if(fCompletionDocument==document->id) CancelCompletion();
+                    document->languageDirty=true;document->textChangedAt=system_time();
+                    if(document.get()==Current()) UpdateSymbolBar();
+                } else if(document.get()==Current() && fLanguageTools.completion) {
+                    int32 character=0;message->FindInt32("character",&character);
+                    fTypedDocument=document->id;fTypedAt=system_time();fTypedCharacter=character;
+                }
+            }
+            break;
+        }
+        case kBrowseSymbols:fModeLayout->SetVisibleItem(int32(0));fSymbolBar->Browse();break;
+        case kSymbolChosen: {
+            int64 document=0,version=0;int32 symbol=-1;
+            message->FindInt64("document",&document);message->FindInt64("version",&version);message->FindInt32("symbol",&symbol);
+            auto* selected=ByID(document);
+            if(selected && selected==d && selected->editor && selected->symbolVersion==version && !selected->languageDirty
+                    && symbol>=0 && symbol<static_cast<int32>(selected->symbols.size()) && selected->editor->Matches(selected->serverText)) {
+                auto offset=selected->symbols[symbol].selection;CancelCompletion();
+                ++fFocusSerial;fModeLayout->SetVisibleItem(int32(0));
+                auto line=editor->SendMessage(SCI_LINEFROMPOSITION,offset);editor->SendMessage(SCI_ENSUREVISIBLEENFORCEPOLICY,line);
+                editor->SendMessage(SCI_GOTOPOS,offset);editor->SendMessage(SCI_SCROLLCARET);editor->MakeFocus();
+            }
+            break;
+        }
         case kShowLauncher:be_app->PostMessage(kShowLauncher);break;
         case kActivateWorkspace:Activate();break;
         case kWorkDone:fJobs->Drain();if(fRecoveryJobs) fRecoveryJobs->Drain();break;
@@ -738,7 +797,10 @@ void Workspace::MessageReceived(BMessage* message) {
             if(message->what==kEditorChanged) {
                 for(auto& document:fDocuments) if(document->editor==source) ++document->revision;
                 UpdateTabs();
-            } else if(editor==source) UpdateStatus();
+            } else if(editor==source) {
+                UpdateStatus();if(editor) fSymbolBar->SetPosition(editor->SendMessage(SCI_GETCURRENTPOS));
+                if(editor && fCompletionDocument==d->id && editor->SendMessage(SCI_GETCURRENTPOS)!=fCompletionCaret) CancelCompletion();
+            }
             break;
         }
         case B_UNDO:case B_REDO:case B_CUT:case B_COPY:case B_PASTE:case B_SELECT_ALL: {
