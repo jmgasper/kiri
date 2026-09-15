@@ -8,6 +8,7 @@ class PreviewView:public BView {
 public:
     PreviewView(std::shared_ptr<BBitmap> bitmap,std::string name,uint64_t bytes);
     PreviewView* Clone() const;
+    void SetBitmap(std::shared_ptr<BBitmap> bitmap,uint64_t bytes) { fBitmap=std::move(bitmap);fBytes=bytes;Invalidate(); }
     void Draw(BRect update) override;
     void MouseDown(BPoint point) override;
     void MouseMoved(BPoint point,uint32 transit,const BMessage* drag) override;

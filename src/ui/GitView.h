@@ -4,9 +4,9 @@
 #include "ui/Async.h"
 #include <View.h>
 #include <memory>
-class BListView;class BStringView;class BTextControl;class BButton;class BTabView;
+class BListView;class BStringView;class BTextControl;class BButton;class BTabView;class BMenuField;
 namespace kiri {
-class Editor;struct EditorSettings;
+class DiffView;struct EditorSettings;
 class GitView:public BView {
 public:
     GitView();
@@ -20,8 +20,11 @@ public:
     void ShowFileHistory(const std::string& path);
     const std::string& Root() const { return fRoot; }
 private:
+    friend struct WorkspaceTestAccess;
     void LoadHistory(bool more);
     void LoadDiff();
+    void LoadCommit();
+    void LoadCommitFile(int index);
     void Operate(uint32 command);
     std::unique_ptr<AsyncQueue> fJobs;
     std::string fRoot,fHistoryPath;
@@ -31,7 +34,10 @@ private:
     BStringView* fStatus;
     BStringView* fHistoryTitle;
     BButton* fMore;
-    Editor* fDiff;
+    DiffView* fDiff;
+    BMenuField* fComparisonFile;
+    std::string fCommitHash;
+    std::vector<GitDiffFile> fCommitFiles;
     std::vector<GitFile> fFiles;
     std::vector<Commit> fCommits;
     CommitGraph fGraph;

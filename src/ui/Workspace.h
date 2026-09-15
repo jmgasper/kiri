@@ -1,6 +1,8 @@
 #pragma once
 #include "core/FileIO.h"
 #include "core/Project.h"
+#include "core/ProjectMonitor.h"
+#include "core/Diff.h"
 #include "core/Recovery.h"
 #include "ui/Async.h"
 #include "ui/Theme.h"
@@ -16,7 +18,7 @@
 #include <vector>
 class BFilePanel;class BCardLayout;class BSplitView;class BStringView;
 class BTextControl;class BCheckBox;class BMessageRunner;
-class BMenuBar;class BMenuField;
+class BMenuBar;class BMenuField;class BButton;
 namespace kiri {
 class Editor;struct EditorState;class Explorer;class GitView;class TerminalPanel;class TabStrip;class RefreshButton;class SymbolBar;
 class Workspace:public BWindow {
@@ -30,6 +32,7 @@ public:
     void OpenFile(const std::string& path,size_t line=1,size_t column=1,bool activate=true,bool preview=false,int64 pane=0,bool focusEditor=true);
 private:
     friend struct WorkspaceTestAccess;
+    struct ExternalChange { FileStamp diskStamp;int64 revision=0;std::string backupDirectory,error;std::shared_ptr<DiffModel> comparison; };
     struct Document {
         int64 id=0,revision=0;
         std::string path,name;
@@ -41,6 +44,11 @@ private:
         int64 closeView=0;
         FileStamp stamp;
         bool bom=false,saving=false,closeAfterSave=false,external=false;
+        bool externalBusy=false;
+        int64 externalSerial=0;
+        FileStamp externalObserved;
+        std::shared_ptr<ExternalChange> externalChange;
+        BMessenger externalWindow;
         std::string recoveryFile;
         int64 recoveryRevision=-1,lastRecovery=0;
         bool recovering=false;
@@ -143,6 +151,16 @@ private:
     void RecoveryTick();
     void ClearRecovery(Document& document);
     void Pulse();
+    void CheckExternalFiles();
+    void CaptureExternal(Document& document,uint32 action=0);
+    void ReloadExternal(Document& document,bool reviewed=false);
+    void ReloadImage(Document& document);
+    void ResolveExternal(BMessage& message);
+    void UpdateExternalBar();
+    void OpenExternalBackups(const std::string& directory);
+    void PollProject();
+    void UpdateNodeWatches(const std::vector<std::string>& directories);
+    void RefreshSearchWindows();
     void Notice(const std::string& text);
     void FormatDocument(Editor* source);
     void ShowLanguageTools();
@@ -162,6 +180,12 @@ private:
     std::unique_ptr<AsyncQueue> fRecoveryJobs;
     std::unique_ptr<BFilePanel> fFolderPanel,fOpenPanel,fSavePanel;
     std::unique_ptr<BMessageRunner> fPulse;
+    std::unique_ptr<BMessageRunner> fExternalTimer;
+    std::shared_ptr<ProjectMonitor> fProjectMonitor;
+    std::map<std::pair<uint64_t,uint64_t>,std::string> fWatchedNodes;
+    std::vector<std::string> fMonitorPriority;
+    bool fMonitorPending=false;
+    int64 fIndexSerial=0;
     std::unique_ptr<BMessageRunner> fRecoveryTimer;
     std::unique_ptr<BMessageRunner> fLanguageTimer;
     std::unique_ptr<BMessageRunner> fDetachTimer;
@@ -222,6 +246,9 @@ private:
     BSplitView* fTerminalSplit;
     BStringView* fStatus;
     BView* fFindBar;
+    BView* fExternalBar;
+    BStringView* fExternalStatus;
+    BButton *fExternalCompare,*fExternalReload,*fExternalKeep;
     BTextControl* fFindText;
     BTextControl* fReplaceText;
     BCheckBox* fMatchCase;

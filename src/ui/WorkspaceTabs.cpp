@@ -66,6 +66,8 @@ Workspace* Workspace::DetachTab(int64 id,BPoint screenPoint) {
     if(!last) {
         detached=std::make_unique<Document>();detached->path=document->path;detached->name=document->name;
         detached->stamp=document->stamp;detached->bom=document->bom;detached->external=document->external;
+        detached->externalObserved=document->externalObserved;detached->externalChange=document->externalChange;
+        if(document->externalWindow.IsValid()) document->externalWindow.SendMessage(B_QUIT_REQUESTED);
         if(tab->editor) {
             copy=std::make_unique<Editor>();
             auto text=tab->editor->Text();copy->SetLanguage(document->path,text.size()>8*1024*1024);

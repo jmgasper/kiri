@@ -30,4 +30,4 @@ index when paths change. A move must preserve Haiku attributes and permissions.
 
 ## Dependencies and review decisions
 
-Coordinate with [external refresh](08-external-file-refresh.md). Decide the initial drag-and-drop scope and how cross-volume moves are handled; permanent deletion need not be offered.
+Coordinate with [external refresh](../future_features/done/08-external-file-refresh.md). Decide the initial drag-and-drop scope and how cross-volume moves are handled; permanent deletion need not be offered.

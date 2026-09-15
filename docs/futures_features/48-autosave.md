@@ -30,4 +30,4 @@ operations that change document identity and preserve the independent recovery m
 
 ## Dependencies and review decisions
 
-Coordinate with [external reload](08-external-file-refresh.md) and [format on save](32-formatting-providers.md). Decide whether focus-loss saving and project overrides belong in the first goal; saving can trigger external build/watch tools.
+Coordinate with [external reload](../future_features/done/08-external-file-refresh.md) and [format on save](32-formatting-providers.md). Decide whether focus-loss saving and project overrides belong in the first goal; saving can trigger external build/watch tools.

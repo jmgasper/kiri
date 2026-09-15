@@ -30,4 +30,4 @@ staging is a possible extension after whole-hunk staging works reliably.
 
 ## Dependencies and review decisions
 
-Needs structured hunk data, shared with [diff viewing](40-side-by-side-diffs.md). The Kiri proposal uses its existing staging model to deliver the reference’s partial-commit outcome. Decide whether selected-line staging belongs in the first goal.
+Needs structured hunk data, shared with [diff viewing](../future_features/done/40-side-by-side-diffs.md). The Kiri proposal uses its existing staging model to deliver the reference’s partial-commit outcome. Decide whether selected-line staging belongs in the first goal.

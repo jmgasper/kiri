@@ -93,7 +93,8 @@ for project-local versions, other languages, configuration and limits.
   terminal directory. Expand folders and double-click files to open them.
   The window title shows the project folder. **View** contains controls for
   showing and hiding the file tree, terminal and source control workspace.
-  The refresh icon beside **FILES** picks up files created outside Kiri.
+  External creation, rename and deletion refresh the tree, index and open search
+  windows automatically. The refresh icon beside **FILES** is also available.
   The tree and document tabs show Haiku's native icons for source files, text,
   web pages, images, archives and other basic file types, with a generic fallback.
 - Tabs show unsaved dots and close controls. Scroll the tab strip to reveal
@@ -157,9 +158,11 @@ and Ctrl+D.
 ## Git
 
 The **Git** workspace shows changed files, staging controls, a commit-message
-field, a branch/merge graph and syntax-colored patches. Select a changed file
-to inspect working-tree or staged changes; select a commit for its metadata and
-patch. **Load More** continues through all reachable history in 200-commit pages.
+field, a branch/merge graph and read-only comparisons. Select a changed file
+to inspect working-tree or staged changes; select a commit and choose a file
+from its **File** menu. **Side by side** switches between aligned source views
+and the unified patch. **Wrap lines**, **Previous** and **Next** support reviewing
+long lines and changed blocks. **Load More** continues through all reachable history in 200-commit pages.
 **Git → File History** filters history to the active file, including renames.
 Fetch, fast-forward-only pull and push use the installed Git and its configured
 credentials. Errors appear in the workspace.
@@ -167,8 +170,10 @@ credentials. Errors appear in the workspace.
 **Git → Copy GitHub Permalink** copies an immutable commit URL for the active
 line or selected line range. SSH and HTTPS GitHub remotes and escaped paths are
 supported. Save edits first: unchanged lines map back to HEAD, while changed
-lines need a commit. Untracked files need staging before their added-line patch
-can be inspected. Merge commits show a patch against the first parent.
+lines need a commit. Untracked files compare against an empty original.
+Merge commits compare against the first parent. Working-tree comparisons use
+**disk snapshots**, while staged comparisons use HEAD and the index; unsaved
+editor text is not included. See [external changes and diffs](docs/EXTERNAL_CHANGES_AND_DIFFS.md).
 
 ## Files, recovery and limits
 
@@ -177,6 +182,14 @@ destination, check for external changes and rename into place. Existing file
 permissions and Haiku attributes are preserved; symlinks resolve to their
 targets. New files use private permissions (0600). UTF-8, optional UTF-8 BOM,
 and existing CRLF/CR/LF bytes are preserved. Other encodings open read-only.
+
+Clean files reload external writes automatically while keeping each pane's
+selection, scroll position and settings. Dirty files show **Compare**, **Reload
+Disk** and **Keep Editing** after preserving both versions in
+`~/config/settings/Kiri/external-changes/`. **Keep Editing** retains the buffer
+and permits the next Save to replace that reviewed disk version; subsequent
+external writes are checked again. **Search → Open External Backups…** opens
+retained copies, including after a reload, save or restart.
 
 Unsaved drafts are periodically captured after about ten seconds and restored
 after an abnormal exit. Large snapshots are copied in chunks and retried if
@@ -195,6 +208,10 @@ details and reproduction commands in [PERFORMANCE.md](docs/PERFORMANCE.md).
 - Project indexing is capped at 500,000 paths; quick-open returns 100 candidates.
   Project search returns up to 2,000 matches and skips binary files, symlinks and
   files over 32 MiB. Git command output is capped at 32 MiB.
+- Comparisons are limited to 8 MiB and 100,000 lines per side, 2,000 files per
+  historical commit, and a bounded amount of diff work. Binary/encoding and
+  size/work limits show an explanation. Full external-change backups are kept
+  even when a text comparison exceeds its display limit.
 - The tree loads directories individually. A single directory with an extreme
   number of direct children and very long text lines need further measurement.
 - Terminal selection covers whole rows. PDF/video viewers, text-encoding
@@ -216,7 +233,7 @@ ctest --test-dir build-host --output-on-failure
 ```
 
 The current suites pass **163 core checks**, **94 Haiku search/edit checks**
-(**91 on Linux**), **266 Haiku editor/file/worker checks** and **351 native
+(**91 on Linux**), **3,675 refresh/diff checks**, **266 Haiku editor/file/worker checks** and **421 native
 workspace checks** (`make check-workspace`). Language checks include real
 Prettier and TypeScript servers: **111 checks** on Linux and **121 on Haiku**,
 where clangd C++ completion and symbols are also exercised:

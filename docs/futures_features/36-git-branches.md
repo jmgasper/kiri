@@ -30,4 +30,4 @@ refresh files, index, status and language services coherently.
 
 ## Dependencies and review decisions
 
-Coordinate with [external reload](08-external-file-refresh.md) and [stashes](37-git-stashes.md). Automatic stashing, branch deletion, merge and rebase should be separately reviewed rather than implied by branch switching.
+Coordinate with [external reload](../future_features/done/08-external-file-refresh.md) and [stashes](37-git-stashes.md). Automatic stashing, branch deletion, merge and rebase should be separately reviewed rather than implied by branch switching.

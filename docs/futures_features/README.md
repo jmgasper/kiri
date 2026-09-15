@@ -3,11 +3,11 @@
 Researched **2026-09-14** against Kiri **0.0.1 alpha**, source commit
 `5ab4ba5517cf04f9de8ab05aad596f9cb9933215`.
 
-This catalog contains **44 draft proposals and 6 completed features** based on features found in CodeEdit,
+This catalog contains **42 draft proposals and 8 completed features** based on features found in CodeEdit,
 CotEditor and JetBrains Fleet. Each file describes the reference behavior,
 Kiri's current support, a candidate scope, acceptance checks, dependencies and
 decisions to make before handing it to Codex as an implementation goal. Completed
-features 01, 04, 05, 06, 25 and 29 are archived in [the done folder](../future_features/done/);
+features 01, 04, 05, 06, 08, 25, 29 and 40 are archived in [the done folder](../future_features/done/);
 their acceptance checks record implementation verification.
 
 The scopes, priorities and sizes are suggestions for the owner to edit. The
@@ -39,8 +39,8 @@ and qualifications appear in each feature file.
 
 ## Suggested review order
 
-- **Soon:** everyday workflow gaps and useful foundations; 12 proposals.
-- **Next:** useful additions after the relevant foundations; 19 proposals.
+- **Soon:** everyday workflow gaps and useful foundations; 11 proposals.
+- **Next:** useful additions after the relevant foundations; 18 proposals.
 - **Later:** optional polish or more specialized workflows; 9 proposals.
 - **Research:** resolve Haiku/tooling/architecture feasibility first; 4 proposals.
 
@@ -51,7 +51,7 @@ IDs are stable references, not an implementation sequence.
 
 A useful first review set is [comment toggling](10-toggle-comments.md),
 [indentation settings](09-editorconfig-indentation.md),
-[external refresh](08-external-file-refresh.md),
+[external refresh](../future_features/done/08-external-file-refresh.md),
 [diagnostics](26-diagnostics.md), [code navigation](27-code-navigation.md) and
 [saved tasks](33-task-runner.md). Implemented [splits](../future_features/done/01-split-editors.md)
 provide shared-view foundations; [explorer operations](07-explorer-file-operations.md)
@@ -78,7 +78,7 @@ remain a larger candidate.
 | 05 | [Filtered and regex project search](../future_features/done/05-scoped-project-search.md) | CE, F | Done | Implemented / M |
 | 06 | [Previewed project-wide replacement](../future_features/done/06-project-replace.md) | CE | Done | Implemented / L |
 | 07 | [Explorer file operations](07-explorer-file-operations.md) | CE | Partial | Soon / L |
-| 08 | [External reload and automatic project refresh](08-external-file-refresh.md) | CE | Partial | Soon / M |
+| 08 | [External reload and automatic project refresh](../future_features/done/08-external-file-refresh.md) | CE | Done | Implemented / M |
 | 16 | [Saved replacement sequences](16-replacement-pipelines.md) | CO | Missing | Later / M |
 | 48 | [Optional autosave to disk](48-autosave.md) | CE, F | Partial | Next / M |
 
@@ -119,7 +119,7 @@ remain a larger candidate.
 | 37 | [Stash management](37-git-stashes.md) | CE | Missing | Next / M |
 | 38 | [Three-way conflict resolution](38-merge-conflicts.md) | F | Missing | Next / L |
 | 39 | [Line-level blame](39-git-blame.md) | F | Partial | Next / M |
-| 40 | [Side-by-side diffs](40-side-by-side-diffs.md) | F | Partial | Next / L |
+| 40 | [Side-by-side diffs](../future_features/done/40-side-by-side-diffs.md) | F | Done | Implemented / L |
 | 41 | [Partial staging and unstaging](41-partial-git-staging.md) | F | Partial | Next / L |
 
 ## Tools and larger directions

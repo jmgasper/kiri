@@ -50,7 +50,9 @@ ProjectIndex IndexProject(const std::string& root, const std::atomic<bool>* canc
             auto end=git.output.find('\0',offset);
             if(end==std::string::npos) break;
             if(result.paths.size()>=limit) { result.truncated=true;break; }
-            result.paths.emplace_back(git.output.substr(offset,end-offset));offset=end+1;
+            auto path=git.output.substr(offset,end-offset);offset=end+1;
+            std::error_code error;auto status=fs::symlink_status(fs::path(root)/path,error);
+            if(!error && (fs::is_regular_file(status) || fs::is_symlink(status))) result.paths.push_back(std::move(path));
         }
         std::sort(result.paths.begin(),result.paths.end());
         result.paths.erase(std::unique(result.paths.begin(),result.paths.end()),result.paths.end());

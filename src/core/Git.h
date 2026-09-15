@@ -1,5 +1,6 @@
 #pragma once
 #include "core/Process.h"
+#include "core/Diff.h"
 #include <optional>
 #include <string_view>
 
@@ -10,6 +11,8 @@ struct Commit {
     std::vector<std::string> parents;
     std::string author, date, subject, refs;
 };
+struct GitDiffFile { std::string path,originalPath,beforeBlob,afterBlob,beforeMode,afterMode; };
+struct GitDiffFiles { std::vector<GitDiffFile> files;std::string error; };
 struct GraphEdge { int from = 0, to = 0, color = 0; };
 struct GraphRow { int lane = 0, color = 0, width = 1; std::vector<GraphEdge> edges; };
 class CommitGraph {
@@ -39,6 +42,9 @@ public:
     ProcessResult Diff(const std::string& path, bool staged,
         const std::atomic<bool>* cancel = nullptr) const;
     ProcessResult CommitDiff(const std::string& hash, const std::atomic<bool>* cancel = nullptr) const;
+    DiffModel CompareFile(const GitFile& file,bool staged,const std::atomic<bool>* cancel=nullptr) const;
+    GitDiffFiles CommitFiles(const std::string& hash,const std::atomic<bool>* cancel=nullptr) const;
+    DiffModel CompareCommitFile(const GitDiffFile& file,const std::string& hash,const std::atomic<bool>* cancel=nullptr) const;
     ProcessResult Stage(const std::vector<std::string>& paths) const;
     ProcessResult Unstage(const std::vector<std::string>& paths) const;
     ProcessResult CommitIndex(const std::string& message) const;

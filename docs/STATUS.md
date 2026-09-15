@@ -1,5 +1,46 @@
 # Verification record
 
+## External refresh and side-by-side diffs — develop
+
+Verified September 15, 2026 on Linux and in the existing Haiku R1/beta5 QEMU VM.
+All four CMake/CTest suites passed. Haiku passed 163 core checks, 94 search/edit
+checks (91 on Linux), 3,675 refresh/diff checks, 266 native editor/worker checks
+and 421 workspace checks. Real Prettier, TypeScript and clangd runs passed 121
+language checks on Haiku.
+
+Portable checks compare randomized diff output with an independent edit-distance
+calculation, and cover line alignment, UTF-8 changes, CRLF, missing final newlines,
+binary/invalid text, cancellation and comparison limits. Real temporary Git
+repositories exercise working-tree, index, initial-commit and historical pairs,
+including added, deleted, renamed and untracked files. Viewing leaves repository
+status unchanged. Incremental polling checks file creation, rename, deletion,
+atomic replacement, nested directories and symlink boundaries.
+
+Native workspace checks verify clean reload in shared panes, independent view
+positions, refreshed symbols and BOM/EOL metadata, dirty-buffer and disk backups,
+Compare/Reload/Keep Editing, typing during reload, stale comparison actions,
+rapid atomic writes, deletion/recreation, image refresh and retained copies after
+closing. Already-open quick-open and project-search windows refresh their results;
+loaded tree branches update without losing manually opened symlink contents.
+Real Scintilla views verify read-only comparisons, aligned annotations, unequal
+wrapping, synchronized scrolling and changed-block navigation. Delayed Git results
+cannot replace a newer file, mode or repository selection. Moving focus away from
+an unfinished commit message cannot submit it.
+
+Live checks in `/boot/home/KiriRefreshDemo` reloaded an external TypeScript edit
+without reopening the file, updated the symbol bar from `original` to `refreshed`,
+and recognized BOM/CRLF metadata. A later external write preserved unsaved typing,
+created byte-checked copies of both versions and opened the side-by-side comparison.
+Wrapping remained aligned, and Reload Disk restored a clean buffer while retaining
+the copies. The Git viewer displayed index and disk snapshots with aligned added
+and replaced lines. Native navigation buttons retain readable desktop colors
+inside dark comparisons.
+
+Usage, recovery policy and explicit limits are documented in
+[external changes and diffs](EXTERNAL_CHANGES_AND_DIFFS.md). Requirements
+[08](future_features/done/08-external-file-refresh.md) and
+[40](future_features/done/40-side-by-side-diffs.md) are archived in the done folder.
+
 ## Project search field focus — develop
 
 Verified September 15, 2026 in the existing Haiku R1/beta5 QEMU VM. The native

@@ -181,7 +181,7 @@ bool Workspace::CloseView(int64 id,bool remember,bool collapse) {
     if(remember && !d->path.empty()) { fClosedTabs.push_back({d->path,pane->id,ViewState(*tab)});if(fClosedTabs.size()>64) fClosedTabs.pop_front(); }
     CancelCompletion();
     if(d->formatView==id) { ++d->formatSerial;fJobs->Cancel("format-"+std::to_string(d->id)); }
-    if(last) { ClearRecovery(*d);CloseLanguage(*d); }
+    if(last) { ClearRecovery(*d);CloseLanguage(*d);if(d->externalWindow.IsValid()) d->externalWindow.SendMessage(B_QUIT_REQUESTED); }
     auto found=std::find_if(pane->tabs.begin(),pane->tabs.end(),[&](const auto& t){return t->id==id;});int index=found-pane->tabs.begin();
     tab->view->RemoveSelf();delete tab->view;pane->tabs.erase(found);
     pane->selected=pane->tabs.empty()?-1:std::clamp(pane->selected-(index<pane->selected?1:0),0,int(pane->tabs.size())-1);

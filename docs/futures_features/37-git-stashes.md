@@ -29,4 +29,4 @@ visible. Refresh open files carefully after restoring changes.
 
 ## Dependencies and review decisions
 
-Reuse [external reload](08-external-file-refresh.md) and [merge resolution](38-merge-conflicts.md). Decide how to identify stashes stably when their displayed numeric positions change; no automatic stash-on-pull is proposed by default.
+Reuse [external reload](../future_features/done/08-external-file-refresh.md) and [merge resolution](38-merge-conflicts.md). Decide how to identify stashes stably when their displayed numeric positions change; no automatic stash-on-pull is proposed by default.

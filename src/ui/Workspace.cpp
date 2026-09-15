@@ -29,6 +29,7 @@
 #include <MenuField.h>
 #include <MessageRunner.h>
 #include <MessageFilter.h>
+#include <NodeMonitor.h>
 #include <Path.h>
 #include <ScrollView.h>
 #include <SplitView.h>
@@ -131,7 +132,8 @@ public:
     void MessageReceived(BMessage* message) override {
         if(message->what==kWorkDone) fJobs->Drain();
         else if(message->what==kPromptCancel) PostMessage(B_QUIT_REQUESTED);
-        else if(message->what==kQueryChanged) {
+        else if(message->what==kQueryChanged || message->what==kProjectUpdated) {
+            if(message->what==kProjectUpdated) fIndex=std::make_shared<ProjectIndex>();
             fJobs->Cancel("query");
             ++fGeneration;fMatches.clear();fRows.clear();while(auto* item=fResults->RemoveItem(int32(0))) delete item;fStatus->SetText("Searching disk…");BMessage request(kProjectSearch);fTimer=std::make_unique<BMessageRunner>(BMessenger(this),&request,120000,1);
         } else if(message->what==kProjectSearch) Query();
@@ -234,9 +236,16 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession,co
             .Add(new BButton("hide find","×",new BMessage(kFind))).End()
         .AddGroup(B_HORIZONTAL,8).Add(fMatchCase).Add(fRegex).Add(fWholeWord).Add(fInSelection).Add(fFindHistory).Add(fFindStatus).AddGlue();
     auto* editorPanel=new BView("editor panel",0);
+    fExternalBar=new BView("external change bar",0);
+    fExternalStatus=new BStringView("external change status","");fExternalStatus->SetTruncation(B_TRUNCATE_END);fExternalStatus->SetExplicitMinSize(BSize(150,22));
+    fExternalCompare=new BButton("compare external","Compare…",new BMessage(kExternalCompare));
+    fExternalReload=new BButton("reload external","Reload Disk",new BMessage(kExternalReload));
+    fExternalKeep=new BButton("keep external","Keep Editing",new BMessage(kExternalKeep));
+    BLayoutBuilder::Group<>(fExternalBar,B_VERTICAL,3).SetInsets(8,4,8,4).Add(fExternalStatus)
+        .AddGroup(B_HORIZONTAL,6).Add(fExternalCompare).Add(fExternalReload).Add(fExternalKeep).AddGlue();
     fSymbolBar=new SymbolBar();
-    BLayoutBuilder::Group<>(editorPanel,B_VERTICAL,0).Add(fSymbolBar).Add(fFindBar).Add(fPaneHost);
-    fFindBar->Hide();
+    BLayoutBuilder::Group<>(editorPanel,B_VERTICAL,0).Add(fExternalBar).Add(fSymbolBar).Add(fFindBar).Add(fPaneHost);
+    fFindBar->Hide();fExternalBar->Hide();
     fGit=new GitView();auto* modes=new BView("workspace modes",0);fModeLayout=new BCardLayout();modes->SetLayout(fModeLayout);fModeLayout->AddView(editorPanel);fModeLayout->AddView(fGit);
     fTerminal=new TerminalPanel();
     fTerminalSplit=new BSplitView(B_VERTICAL,1);fTerminalSplit->AddChild(modes);fTerminalSplit->AddChild(fTerminal);
@@ -257,6 +266,7 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession,co
     BMessage opened(kWorkspaceOpened);opened.AddMessenger("workspace",BMessenger(this));be_app->PostMessage(&opened);
 }
 Workspace::~Workspace() {
+    fExternalTimer.reset();stop_watching(BMessenger(this));for(auto& d:fDocuments) if(d->externalWindow.IsValid()) d->externalWindow.SendMessage(B_QUIT_REQUESTED);
     RegisterEditWorkspace(false);
     BMessage closed(kWorkspaceClosed);closed.AddMessenger("workspace",BMessenger(this));be_app->PostMessage(&closed);
     for(auto& window:fSearchWindows) if(window.IsValid()) window.SendMessage(B_QUIT_REQUESTED);
@@ -291,7 +301,7 @@ BMenuBar* Workspace::BuildMenus() {
     add(view,"Preview Tabs",kPreviewTabs);view->FindItem(kPreviewTabs)->SetMarked(fPreviewTabs);view->AddSeparatorItem();
     fThemes=ThemeMenu("Color Theme",kTheme,0);fThemes->SetLabelFromMarked(false);
     view->AddItem(fThemes);add(view,"Zoom In",kZoomIn,'+');add(view,"Zoom Out",kZoomOut,'-');add(view,"Word Wrap",kWrap);add(view,"Show Whitespace",kShowWhitespace);bar->AddItem(view);
-    auto* search=new BMenu("Search");add(search,"Find / Replace",kFind,'F');add(search,"Find Next",kFindNext);add(search,"Find Previous",kFindPrevious);add(search,"Open Quickly…",kQuickOpen,'P');add(search,"Search Project…",kProjectSearch,'F',B_SHIFT_KEY);add(search,"Go to Line…",kGoToLine,'G');add(search,"Go to Symbol…",kBrowseSymbols,'R',B_SHIFT_KEY);bar->AddItem(search);
+    auto* search=new BMenu("Search");add(search,"Find / Replace",kFind,'F');add(search,"Find Next",kFindNext);add(search,"Find Previous",kFindPrevious);add(search,"Open Quickly…",kQuickOpen,'P');add(search,"Search Project…",kProjectSearch,'F',B_SHIFT_KEY);add(search,"Go to Line…",kGoToLine,'G');add(search,"Go to Symbol…",kBrowseSymbols,'R',B_SHIFT_KEY);search->AddSeparatorItem();add(search,"Compare External Changes…",kExternalCompare);add(search,"Open External Backups…",kExternalBackups);bar->AddItem(search);
     auto* git=new BMenu("Git");add(git,"Show Source Control",kToggleGit);add(git,"File History",kFileHistory);add(git,"Copy GitHub Permalink",kCopyPermalink,'L',B_SHIFT_KEY);git->AddSeparatorItem();add(git,"Refresh",kGitRefresh);add(git,"Fetch",kGitFetch);add(git,"Pull (Fast-forward Only)",kGitPull);add(git,"Push",kGitPush);bar->AddItem(git);
     auto* term=new BMenu("Terminal");add(term,"New Terminal",kNewTerminal,'T',B_SHIFT_KEY);add(term,"Close Terminal",kCloseTerminal);term->AddSeparatorItem();add(term,"Show / Hide",kToggleTerminal);bar->AddItem(term);
     return bar;
@@ -299,6 +309,7 @@ BMenuBar* Workspace::BuildMenus() {
 Workspace::Document* Workspace::ByID(int64 id) { for(auto& document:fDocuments) if(document->id==id) return document.get();return nullptr; }
 void Workspace::Notice(const std::string& text) { fStatus->SetText(text.c_str());fStatus->SetToolTip(text.c_str()); }
 void Workspace::UpdateStatus() {
+    UpdateExternalBar();
     auto* d=Current();
     if(fSessionDirectory!=fSettings) {
         auto title=d?d->name+" — Kiri":std::string("Kiri");if(title!=Title()) SetTitle(title.c_str());
@@ -306,7 +317,7 @@ void Workspace::UpdateStatus() {
     if(!d) { Notice(fProject.empty()?"Open a folder to begin":fProject+" · "+std::to_string(fIndex->paths.size())+" indexed files");return; }
     std::string status=d->path.empty()?d->name:d->path;
     if(d->saving) status+="  ·  Saving…";
-    else if(d->external) status+="  ·  Changed on disk — reopen to reload, or Save As to keep your edits";
+    else if(d->external) status+="  ·  Changed on disk — compare, reload, or keep editing";
     else if(d->editor) {
         auto position=d->editor->SendMessage(SCI_GETCURRENTPOS);
         status+="  ·  Ln "+std::to_string(d->editor->SendMessage(SCI_LINEFROMPOSITION,position)+1)+", Col "+std::to_string(d->editor->SendMessage(SCI_GETCOLUMN,position)+1);
@@ -348,15 +359,17 @@ void Workspace::OpenProject(const std::string& input) {
         if(fEditWindow.IsValid() && !fApplyingEdit) fEditWindow.SendMessage(B_QUIT_REQUESTED);
     }
     fProject=path;++fGeneration;fIndex=std::make_shared<ProjectIndex>();fGitRoot.clear();fExplorer->Clear();fGit->SetRepository("");
+    stop_watching(BMessenger(this));fWatchedNodes.clear();fProjectMonitor=std::make_shared<ProjectMonitor>(path);fMonitorPending=false;fMonitorPriority.clear();
     SetTitle((fs::path(path).filename().string()+" — Kiri").c_str());
     Notice("Opening project…");auto generation=fGeneration;
     LoadDirectory(path);
-    fJobs->Submit([this,path,generation](const auto& cancel) {
+    auto indexSerial=++fIndexSerial;
+    fJobs->Submit([this,path,generation,indexSerial](const auto& cancel) {
         auto index=std::make_shared<ProjectIndex>(IndexProject(path,&cancel));auto result=GitRepository(path).Run({"rev-parse","--show-toplevel"},&cancel);
         auto root=result.ok()?result.output:std::string();while(!root.empty() && (root.back()=='\n' || root.back()=='\r')) root.pop_back();
-        return [this,index,root,result,generation] {
+        return [this,index,root,result,generation,indexSerial] {
             if(generation!=fGeneration) return;
-            fIndex=index;fGitRoot=root;fGit->SetRepository(root,result.ok()?"":result.diagnostic());UpdateStatus();SaveSettings();
+            if(indexSerial==fIndexSerial) fIndex=index;fGitRoot=root;fGit->SetRepository(root,result.ok()?"":result.diagnostic());UpdateStatus();SaveSettings();PollProject();
         };
     },"project");
     // A project change gets a fresh shell without interrupting existing tabs.
@@ -373,10 +386,10 @@ void Workspace::LoadDirectory(const std::string& path) {
     });
 }
 void Workspace::RefreshIndex() {
-    if(fProject.empty()) return;auto path=fProject;auto generation=fGeneration;
-    fJobs->Submit([this,path,generation](const auto& cancel) {
+    if(fProject.empty()) return;auto path=fProject;auto generation=fGeneration;auto serial=++fIndexSerial;
+    fJobs->Submit([this,path,generation,serial](const auto& cancel) {
         auto index=std::make_shared<ProjectIndex>(IndexProject(path,&cancel));
-        return [this,index,generation] { if(generation==fGeneration) fIndex=index; };
+        return [this,index,generation,serial] { if(generation==fGeneration && serial==fIndexSerial) { fIndex=index;RefreshSearchWindows(); } };
     },"index refresh");
 }
 void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool activate,bool preview,int64 paneID,bool focusEditor) {
@@ -385,13 +398,11 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
     if(fRestoring && fRestoringDrafts) { if(std::find(fRestorePaths.begin(),fRestorePaths.end(),path)==fRestorePaths.end()) fRestorePaths.push_back(path);return; }
     preview=preview && fPreviewTabs;PromotePreviews();
     auto paneSerial=++pane->openSerial;auto focus=activate?++fFocusSerial:0;
-    int64 reloadID=0,reloadRevision=0;
     for(auto& document:fDocuments) if(document->path==path) {
         auto* d=document.get();
         if(activate) RememberRecent(path,false);
         if(activate && !preview && d->external && d->editor) {
-            int32 choice=(new BAlert("Reload File","This file changed on disk. Reloading replaces its contents in every pane and clears its undo history.","Cancel","Reload",nullptr,B_WIDTH_AS_USUAL,B_WARNING_ALERT))->Go();
-            if(choice!=1) return;reloadID=d->id;reloadRevision=d->editor->InputRevision();break;
+            BMessage compare(kExternalCompare);compare.AddInt64("document",d->id);ResolveExternal(compare);
         }
         ShowDocument(*pane,*d,line,column,preview,activate,focusEditor);SaveSettings();return;
     }
@@ -403,7 +414,7 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
     fPendingOpen.insert(path);Notice("Opening "+path+"…");
     auto* original=Current();auto originalID=original?original->id:0,originalRevision=original && original->editor?original->editor->InputRevision():0;
     auto loader=fLoaderFactory->CreateLoader(StatFile(path).size>8*1024*1024);
-    fJobs->Submit([this,path,line,column,loader,activate,preview,paneID,paneSerial,focusEditor,focus,originalID,originalRevision,reloadID,reloadRevision](const auto& cancel) {
+    fJobs->Submit([this,path,line,column,loader,activate,preview,paneID,paneSerial,focusEditor,focus,originalID,originalRevision](const auto& cancel) {
         struct Loaded { FileData data;std::shared_ptr<BBitmap> image; };
         auto loaded=std::make_shared<Loaded>();
         std::string extension=fs::path(path).extension().string();for(auto& c:extension) c=std::tolower(static_cast<unsigned char>(c));
@@ -413,7 +424,7 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
             if(!loader->loader) loaded->data.error="Not enough memory to open this document.";
             else loaded->data=ReadFile(path,&cancel,1024ULL*1024*1024,[&](std::string_view chunk){return loader->loader->AddData(chunk.data(),chunk.size())==SC_STATUS_OK;});
         }
-        return [this,path,line,column,loaded,loader,activate,preview,paneID,paneSerial,focusEditor,focus,originalID,originalRevision,reloadID,reloadRevision] {
+        return [this,path,line,column,loaded,loader,activate,preview,paneID,paneSerial,focusEditor,focus,originalID,originalRevision] {
             fPendingOpen.erase(path);
             auto requests=std::move(fPendingRequests[path]);fPendingRequests.erase(path);
             auto finish=[&] { for(auto& request:requests) request();FinishRestore();SaveSettings(); };
@@ -433,19 +444,6 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
                     if(!loaded->data.utf8 && !loaded->data.binary) d->name+=" · non-UTF-8";
                 } else d->editor->Adopt(*loader,loaded->data.eol);
                 d->editor->SetLanguage(binary?"preview.txt":path,!binary && d->stamp.size>8*1024*1024);d->editor->ApplySettings(fEditorSettings);
-            }
-            if(reloadID) {
-                auto* existing=ByID(reloadID);
-                if(!existing || !existing->editor || existing->editor->InputRevision()!=reloadRevision || !d->editor) {
-                    delete d->view;Notice("Reload was not applied because the document changed or closed.");finish();return;
-                }
-                CancelCompletion();CloseLanguage(*existing);ClearRecovery(*existing);++existing->formatSerial;
-                d->editor->State()->revision=reloadRevision+1;
-                for(auto& group:fPanes) for(auto& tab:group->tabs) if(tab->document==reloadID) {
-                    auto state=ViewState(*tab);tab->editor->ShareDocument(*d->editor);RestoreView(*tab,state);
-                }
-                existing->buffer=d->editor->State();existing->stamp=d->stamp;existing->bom=d->bom;existing->name=d->name;existing->external=false;
-                delete d->view;UpdateTabs();finish();return;
             }
             auto* original=ByID(originalID);
             bool front=activate && focus==fFocusSerial && (!original || !original->editor || original->editor->InputRevision()==originalRevision);
@@ -728,25 +726,18 @@ void Workspace::ClearRecovery(Document& d) {
     d.recovering=false;d.recoveryRevision=-1;
 }
 void Workspace::Pulse() {
-    StartRecovery();
-    if(fDiskCheckPending || fDocuments.empty()) return;
-    std::vector<std::pair<int64,std::string>> files;
-    for(const auto& d:fDocuments) if(!d->path.empty() && !d->saving) files.emplace_back(d->id,d->path);
-    fDiskCheckPending=true;
-    fJobs->Submit([this,files](const auto&) {
-        std::vector<std::pair<int64,FileStamp>> stamps;
-        for(const auto& file:files) stamps.emplace_back(file.first,StatFile(file.second));
-        return [this,stamps] {
-            fDiskCheckPending=false;bool changed=false;
-            for(const auto& item:stamps) {
-                auto* d=ByID(item.first);if(!d || d->saving) continue;
-                bool external=d->stamp!=item.second;if(external!=d->external) { d->external=external;changed=true; }
-            }
-            if(changed) UpdateTabs();
-        };
-    });
+    StartRecovery();CheckExternalFiles();PollProject();
 }
 void Workspace::MessageReceived(BMessage* message) {
+    if(message->what==B_NODE_MONITOR) {
+        int32 opcode=0,fields=0;message->FindInt32("opcode",&opcode);message->FindInt32("fields",&fields);
+        if(opcode==B_STAT_CHANGED && !(fields&(B_STAT_SIZE|B_STAT_MODIFICATION_TIME|B_STAT_CHANGE_TIME|B_STAT_MODE))) return;
+        int32 device=0;message->FindInt32("device",&device);
+        for(auto name:{"directory","from directory","to directory"}) { int64 node=0;if(message->FindInt64(name,&node)==B_OK) { auto found=fWatchedNodes.find({uint64_t(device),uint64_t(node)});if(found!=fWatchedNodes.end()) fMonitorPriority.push_back(found->second); } }
+        BMessage tick(kExternalTick);fExternalTimer=std::make_unique<BMessageRunner>(BMessenger(this),&tick,250000,1);return;
+    }
+    if(message->what==kExternalTick) { fExternalTimer.reset();Pulse();RefreshSearchWindows();return; }
+    if(message->what==kExternalCompare || message->what==kExternalReload || message->what==kExternalKeep || message->what==kExternalBackups) { ResolveExternal(*message);return; }
     if(message->what==kTabDragUpdate || message->what==kTabDragEnd || message->what==kTabDragCancel) { TrackTabDrag(*message);return; }
     if(message->what==kDetachTabReady) {
         auto id=fDetachTab;auto point=fDetachPoint;fDetachTimer.reset();fDetachTab=0;

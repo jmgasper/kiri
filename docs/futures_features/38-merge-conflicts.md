@@ -30,4 +30,4 @@ explicit completion. Preserve the source revisions used to start the resolution.
 
 ## Dependencies and review decisions
 
-Build on [diff views](40-side-by-side-diffs.md) and shared document ownership. Decide whether initiating merges belongs in a later goal; resolving an existing conflict is independently useful even while Pull stays fast-forward-only.
+Build on [diff views](../future_features/done/40-side-by-side-diffs.md) and shared document ownership. Decide whether initiating merges belongs in a later goal; resolving an existing conflict is independently useful even while Pull stays fast-forward-only.

@@ -31,6 +31,9 @@ Explorer::Explorer():BOutlineListView("files",B_SINGLE_SELECTION_LIST,B_WILL_DRA
 }
 Explorer::~Explorer() { Clear(); }
 void Explorer::Clear() {
+    ClearItems();fRoot.clear();fListings.clear();fExpanded.clear();
+}
+void Explorer::ClearItems() {
     std::vector<BListItem*> items;
     for(int32 i=0;i<FullListCountItems();++i) items.push_back(FullListItemAt(i));
     MakeEmpty();for(auto* item:items) delete item;
@@ -42,25 +45,30 @@ void Explorer::AddEntries(const DirectoryResult& listing,FileItem* parent) {
         const auto& entry=listing.entries[parent?listing.entries.size()-1-i:i];
         auto* item=new FileItem(entry,parent?parent->OutlineLevel()+1:0);
         if(parent) AddUnder(item,parent);else AddItem(item);
-        if(entry.directory) AddUnder(new FileItem({"Loading…",entry.path,false,false},item->OutlineLevel()+1,true),item);
+        if(entry.directory) {
+            auto found=fListings.find(entry.path);
+            if(found!=fListings.end()) { item->loaded=true;AddEntries(found->second,item); }
+            else AddUnder(new FileItem({"Loading…",entry.path,false,false},item->OutlineLevel()+1,true),item);
+            if(fExpanded.count(entry.path)) Expand(item);
+        }
     }
     if(!listing.error.empty()) {
         auto* error=new FileItem({listing.error,"",false,false},parent?parent->OutlineLevel()+1:0,true);
         if(parent) AddUnder(error,parent);else AddItem(error);
     }
 }
-void Explorer::SetRoot(const std::string&,const DirectoryResult& listing) { Clear();AddEntries(listing,nullptr); }
+void Explorer::SetRoot(const std::string& path,const DirectoryResult& listing) { if(fRoot!=path) Clear();fRoot=path;fListings[path]=listing;Rebuild(); }
 void Explorer::AddListing(const std::string& path,const DirectoryResult& listing) {
-    for(int32 i=0;i<FullListCountItems();++i) {
-        auto* parent=static_cast<FileItem*>(FullListItemAt(i));
-        if(parent->placeholder || parent->entry.path!=path) continue;
-        int32 child=i+1;
-        if(child<FullListCountItems()) {
-            auto* item=static_cast<FileItem*>(FullListItemAt(child));
-            if(item->placeholder) { RemoveItem(item);delete item; }
-        }
-        AddEntries(listing,parent);Invalidate();return;
-    }
+    fListings[path]=listing;Rebuild();
+}
+std::vector<std::string> Explorer::LoadedDirectories() const { std::vector<std::string> result;for(auto& listing:fListings) result.push_back(listing.first);return result; }
+void Explorer::Rebuild() {
+    fExpanded.clear();std::string selection;auto* selected=static_cast<FileItem*>(ItemAt(CurrentSelection()));if(selected) selection=selected->entry.path;
+    auto scroll=Bounds().LeftTop();
+    for(int32 i=0;i<FullListCountItems();++i) { auto* item=static_cast<FileItem*>(FullListItemAt(i));if(item->entry.directory && item->IsExpanded()) fExpanded.insert(item->entry.path); }
+    ClearItems();auto root=fListings.find(fRoot);if(root!=fListings.end()) AddEntries(root->second,nullptr);
+    for(int32 i=0;i<CountItems();++i) if(static_cast<FileItem*>(ItemAt(i))->entry.path==selection) { Select(i);break; }
+    ScrollTo(scroll);Invalidate();
 }
 void Explorer::CheckExpanded() {
     for(int32 i=0;i<FullListCountItems();++i) {

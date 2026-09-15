@@ -3,11 +3,15 @@
 #include "ui/Editor.h"
 #include "ui/TabStrip.h"
 #include "ui/TerminalPanel.h"
+#include "ui/DiffView.h"
+#include "ui/GitView.h"
+#include "ui/Explorer.h"
 #include <Application.h>
 #include <Button.h>
 #include <CardLayout.h>
 #include <File.h>
 #include <ListView.h>
+#include <LayoutBuilder.h>
 #include <OS.h>
 #include <SplitView.h>
 #include <TextControl.h>
@@ -41,7 +45,8 @@ static int LanguageFixture() {
             else if(method=="textDocument/documentSymbol") {
                 auto uri=params["textDocument"]["uri"].get<std::string>();auto text=documents.at(uri);
                 Json range={{"start",PositionJSON({0,0})},{"end",PositionJSON(PositionAt(text,text.size()))}};
-                result=Json::array({{{"name",fs::path(uri).filename().string()},{"kind",13},{"range",range},{"selectionRange",range}}});
+                auto name=text.find("externalSymbol")!=std::string::npos?"externalSymbol":fs::path(uri).filename().string();
+                result=Json::array({{{"name",name},{"kind",13},{"range",range},{"selectionRange",range}}});
             } else if(method=="textDocument/prepareRename") {
                 auto text=documents.at(params["textDocument"]["uri"]);auto start=text.find("old");
                 if(start!=std::string::npos) result={{"range",{{"start",PositionJSON(PositionAt(text,start))},{"end",PositionJSON(PositionAt(text,start+3))}}},{"placeholder","old"}};
@@ -191,6 +196,120 @@ struct WorkspaceTestAccess {
         CHECK(!w->CurrentTab()->editor);detached=w->DetachTab(imageID,BPoint(210,210));CHECK(detached && detached->Lock());
         CHECK(detached->CurrentTab()->view==imageView && !detached->CurrentTab()->editor);CHECK(detached->QuitRequested());detached->Quit();
         CHECK(w->QuitRequested());w->Quit();
+    }
+    static void RefreshAndDiff(const std::string& base,const std::string& executable) {
+        auto root=base+"/refresh-project",settings=base+"/refresh-settings";fs::create_directories(root+"/src");auto file=root+"/src/example.ts";
+        std::string original="const original = 1;\n";for(int i=0;i<120;++i) original+="// line "+std::to_string(i)+" 😀\n";
+        {std::ofstream(file)<<original;}
+        auto* w=new Workspace(settings,false);w->Show();CHECK(w->Lock());
+        w->fLanguageTools.profiles={{"Fixture","typescript","'"+executable+"' --language-fixture",{".ts"}}};w->OpenProject(root);Open(*w,file);
+        auto* left=w->Current()->editor;auto id=w->Current()->id;w->SplitPane(B_HORIZONTAL);auto* right=w->Current()->editor;
+        left->SendMessage(SCI_SETSEL,left->SendMessage(SCI_FINDCOLUMN,3,2),left->SendMessage(SCI_FINDCOLUMN,3,6));left->SendMessage(SCI_SETFIRSTVISIBLELINE,2);
+        right->SendMessage(SCI_SETSEL,right->SendMessage(SCI_FINDCOLUMN,50,1),right->SendMessage(SCI_FINDCOLUMN,50,4));right->SendMessage(SCI_SETFIRSTVISIBLELINE,40);
+        auto changed=std::string("const externalSymbol = 2;\r\n");for(int i=0;i<120;++i) changed+="// line "+std::to_string(i)+" 😀\r\n";
+        {std::ofstream(file+".tmp")<<"\xef\xbb\xbf"<<changed;}fs::rename(file+".tmp",file);w->Pulse();
+        Wait(*w,[&]{return left->Matches(changed) && !w->ByID(id)->externalBusy;});CHECK(right->Matches(changed));CHECK(!left->Dirty());CHECK(w->ByID(id)->bom);
+        CHECK(left->SendMessage(SCI_GETEOLMODE)==0 && right->SendMessage(SCI_GETEOLMODE)==0);
+        CHECK(left->SendMessage(SCI_LINEFROMPOSITION,left->SendMessage(SCI_GETCURRENTPOS))==3);CHECK(left->SendMessage(SCI_GETCOLUMN,left->SendMessage(SCI_GETCURRENTPOS))==6);
+        CHECK(right->SendMessage(SCI_LINEFROMPOSITION,right->SendMessage(SCI_GETCURRENTPOS))==50);CHECK(right->SendMessage(SCI_GETFIRSTVISIBLELINE)==40);
+        CHECK(left->SendMessage(SCI_GETDOCPOINTER)==right->SendMessage(SCI_GETDOCPOINTER));
+        Wait(*w,[&]{auto* d=w->ByID(id);return d->serverText==changed && d->symbols.size()==1 && d->symbols[0].name=="externalSymbol";});
+        auto revision=left->InputRevision();for(int i=0;i<3;++i) {w->Pulse();Wait(*w,[&]{return !w->fDiskCheckPending;});}CHECK(left->InputRevision()==revision);
+        // Preserve both versions, leave the dirty buffer unchanged, then resolve.
+        left->SendMessage(SCI_APPENDTEXT,7,reinterpret_cast<sptr_t>("// mine"));auto mine=left->Text();{std::ofstream(file)<<"disk version\n";}w->Pulse();
+        Wait(*w,[&]{auto* d=w->ByID(id);return d->external && !d->externalBusy && d->externalChange;});
+        auto snapshot=w->ByID(id)->externalChange;CHECK(snapshot->error.empty());CHECK(left->Matches(mine));CHECK(ReadFile(file).bytes=="disk version\n");
+        CHECK(ReadFile(snapshot->backupDirectory+"/buffer-example.ts").bytes=="\xef\xbb\xbf"+mine);CHECK(ReadFile(snapshot->backupDirectory+"/disk-example.ts").bytes=="disk version\n");
+        auto snapshotSerial=w->ByID(id)->externalSerial;w->Pulse();Wait(*w,[&]{return !w->fDiskCheckPending;});CHECK(w->ByID(id)->externalSerial==snapshotSerial);
+        BMessage compare(kExternalCompare);compare.AddInt64("document",id);w->ResolveExternal(compare);CHECK(w->ByID(id)->externalWindow.IsValid());
+        BMessage keep(kExternalKeep);keep.AddInt64("document",id);keep.AddInt64("external_serial",snapshotSerial);w->ResolveExternal(keep);CHECK(!w->ByID(id)->external);CHECK(left->Dirty());Save(*w);
+        CHECK(ReadFile(file).bytes=="\xef\xbb\xbf"+mine);CHECK(fs::exists(snapshot->backupDirectory+"/disk-example.ts"));
+        revision=left->InputRevision();w->Pulse();Wait(*w,[&]{return !w->fDiskCheckPending;});CHECK(left->InputRevision()==revision && !w->ByID(id)->external);
+        left->SendMessage(SCI_APPENDTEXT,7,reinterpret_cast<sptr_t>("// more"));{std::ofstream(file)<<"reload this\n";}w->Pulse();
+        Wait(*w,[&]{return w->ByID(id)->externalChange!=snapshot && !w->ByID(id)->externalBusy;});
+        BMessage stale(kExternalKeep);stale.AddInt64("document",id);stale.AddInt64("external_serial",snapshotSerial);w->ResolveExternal(stale);CHECK(w->ByID(id)->external);
+        // Typing after the comparison must be backed up before an explicit reload.
+        left->SendMessage(SCI_APPENDTEXT,6,reinterpret_cast<sptr_t>("// new"));auto latest=left->Text();BMessage reload(kExternalReload);reload.AddInt64("document",id);w->ResolveExternal(reload);
+        Wait(*w,[&]{return left->Matches("reload this\n") && !w->ByID(id)->externalBusy;});CHECK(!left->Dirty());CHECK(!w->ByID(id)->bom);CHECK(left->SendMessage(SCI_GETEOLMODE)==SC_EOL_LF);
+        auto reloaded=w->ByID(id)->externalChange;CHECK(ReadFile(reloaded->backupDirectory+"/buffer-example.ts").bytes=="\xef\xbb\xbf"+latest);
+        fs::remove(file);w->Pulse();Wait(*w,[&]{return w->ByID(id)->external && w->ByID(id)->externalChange!=reloaded && !w->ByID(id)->externalBusy;});CHECK(left->Matches("reload this\n"));CHECK(left->Dirty());
+        BMessage recreate(kExternalKeep);recreate.AddInt64("document",id);w->ResolveExternal(recreate);Save(*w);CHECK(ReadFile(file).bytes=="reload this\n");
+        // An edit typed while an automatic read is in flight must never be lost.
+        {std::ofstream(file)<<"racing disk\n";}w->ReloadExternal(*w->ByID(id));left->SendMessage(SCI_APPENDTEXT,6,reinterpret_cast<sptr_t>("typed!"));
+        Wait(*w,[&]{return !w->ByID(id)->externalBusy;});CHECK(left->Matches("reload this\ntyped!"));CHECK(left->Dirty());
+        w->Pulse();Wait(*w,[&]{auto d=w->ByID(id);return d->externalChange && d->externalChange->revision==left->InputRevision() && !d->externalBusy;});
+        w->ResolveExternal(reload);Wait(*w,[&]{return left->Matches("racing disk\n") && !w->ByID(id)->externalBusy;});
+        for(int i=0;i<6;++i) { std::ofstream(file+".tmp")<<"rapid "<<i<<'\n';fs::rename(file+".tmp",file);w->Pulse(); }
+        Wait(*w,[&]{return left->Matches("rapid 5\n") && !w->ByID(id)->externalBusy;});CHECK(!left->Dirty());
+        // Loaded tree branches, the cached index and already-open quick-open refresh.
+        w->LoadDirectory(root+"/src");Wait(*w,[&]{return w->fExplorer->LoadedDirectories().size()>=2 && !w->fMonitorPending;});
+        w->Search(false);auto search=w->fSearchWindows.back();
+        auto rows=[&](BMessenger target) { if(target.LockTargetWithTimeout(100000)!=B_OK) return -1;BLooper* looper=nullptr;target.Target(&looper);auto* window=dynamic_cast<BWindow*>(looper);auto* list=window?dynamic_cast<BListView*>(window->FindView("results")):nullptr;auto count=list?list->CountItems():-1;looper->Unlock();return count; };
+        w->Search(true);auto projectSearch=w->fSearchWindows.back();CHECK(projectSearch.LockTargetWithTimeout(100000)==B_OK);
+        BLooper* searchLooper=nullptr;projectSearch.Target(&searchLooper);auto* searchWindow=dynamic_cast<BWindow*>(searchLooper);dynamic_cast<BTextControl*>(searchWindow->FindView("query"))->SetText("created");searchWindow->PostMessage(kQueryChanged);searchLooper->Unlock();
+        {std::ofstream(root+"/src/created.txt")<<"created\n";}w->Pulse();
+        Wait(*w,[&]{return std::find(w->fIndex->paths.begin(),w->fIndex->paths.end(),"src/created.txt")!=w->fIndex->paths.end();});
+        Wait(*w,[&]{return rows(search)==2 && rows(projectSearch)==2;});
+        auto inTree=[&](const std::string& path) {for(int32 i=0;i<w->fExplorer->FullListCountItems();++i) if(static_cast<FileItem*>(w->fExplorer->FullListItemAt(i))->entry.path==path) return true;return false;};
+        Wait(*w,[&]{return inTree(root+"/src/created.txt");});
+        fs::rename(root+"/src/created.txt",root+"/src/renamed.txt");w->Pulse();Wait(*w,[&]{return inTree(root+"/src/renamed.txt") && !inTree(root+"/src/created.txt");});
+        fs::remove(root+"/src/renamed.txt");w->Pulse();Wait(*w,[&]{return !inTree(root+"/src/renamed.txt") && w->fIndex->paths.size()==1 && rows(search)==1 && rows(projectSearch)==0;});CHECK(search.IsValid());search.SendMessage(B_QUIT_REQUESTED);projectSearch.SendMessage(B_QUIT_REQUESTED);
+        // Manually opening a symlink directory still displays its cached children
+        // after a refresh. Automatic monitoring does not recurse through links.
+        fs::create_directory_symlink(root+"/src",root+"/linked");w->LoadDirectory(root);w->LoadDirectory(root+"/linked");
+        Wait(*w,[&]{return inTree(root+"/linked/example.ts");});CHECK(inTree(root+"/linked/example.ts"));
+        w->fExplorer->SetRoot(root,ListDirectory(root));CHECK(inTree(root+"/linked/example.ts"));
+        fs::remove(root+"/linked");w->LoadDirectory(root);
+        auto image=root+"/image.png";fs::copy_file(CanonicalPath("resources/branding/kiri-icon-256.png"),image);Open(*w,image);auto imageID=w->Current()->id;auto* imageView=w->CurrentTab()->view;
+        fs::copy_file(image,image+".tmp");fs::rename(image+".tmp",image);w->Pulse();Wait(*w,[&]{auto* d=w->ByID(imageID);return d->stamp==StatFile(image) && !d->externalBusy;});CHECK(w->ByID(imageID)->view==imageView && !w->ByID(imageID)->external);
+        auto backup=reloaded->backupDirectory;w->Quit();CHECK(ReadFile(backup+"/buffer-example.ts").bytes=="\xef\xbb\xbf"+latest);
+
+        // Exercise annotation alignment, wrapping and synchronization in real Scintilla views.
+        auto* window=new BWindow(BRect(50,50,1050,650),"Diff tests",B_TITLED_WINDOW,B_AUTO_UPDATE_SIZE_LIMITS);
+        auto* diff=new DiffView();BLayoutBuilder::Group<>(window,B_VERTICAL,0).Add(diff);window->Show();CHECK(window->Lock());
+        DiffSource before,after;before.path=after.path="sample.cpp";before.label="Original";after.label="Modified";
+        before.text="same\nold 😀\ntail\n";after.text="intro\nsame\nnew 😁\nadded\ntail\n";
+        auto model=std::make_shared<DiffModel>(CompareText(before,after));diff->SetModel(model);diff->Align();
+        CHECK(diff->Left()->SendMessage(SCI_GETREADONLY) && diff->Right()->SendMessage(SCI_GETREADONLY));
+        CHECK(diff->Left()->SendMessage(SCI_ANNOTATIONGETLINES,0)==1);CHECK(diff->Left()->SendMessage(SCI_ANNOTATIONGETLINES,2)==1);
+        CHECK(diff->Left()->SendMessage(SCI_VISIBLEFROMDOCLINE,3)==diff->Right()->SendMessage(SCI_VISIBLEFROMDOCLINE,5));
+        auto text=diff->Right()->Text();diff->Right()->SendMessage(SCI_APPENDTEXT,4,reinterpret_cast<sptr_t>("oops"));CHECK(diff->Right()->Matches(text));
+        diff->SetSideBySide(false);CHECK(diff->Model()==model);diff->SetSideBySide(true);diff->Navigate(1);CHECK(diff->Model()==model);
+        before.text="short\n";after.text=std::string(700,'x')+"\n";for(int i=0;i<120;++i) { before.text+="equal line\n";after.text+="equal line\n"; }
+        diff->SetModel(std::make_shared<DiffModel>(CompareText(before,after)));diff->SetWrap(true);
+        auto wrappingDeadline=system_time()+5000000;
+        do { window->Unlock();snooze(50000);if(!window->Lock()) throw std::runtime_error("Diff window closed");diff->Align(); } while(diff->Right()->SendMessage(SCI_WRAPCOUNT,1)<=1 && system_time()<wrappingDeadline);
+        if(diff->Right()->SendMessage(SCI_WRAPCOUNT,1)<=1) throw std::runtime_error("Wrap not realized: mode="+std::to_string(diff->Right()->SendMessage(SCI_GETWRAPMODE))+" width="+std::to_string(diff->Right()->Bounds().Width())+" length="+std::to_string(diff->Right()->SendMessage(SCI_GETLENGTH))+" hidden="+std::to_string(diff->Right()->IsHidden()));
+        CHECK(diff->Right()->SendMessage(SCI_WRAPCOUNT,1)>1);CHECK(diff->Left()->SendMessage(SCI_VISIBLEFROMDOCLINE,2)==diff->Right()->SendMessage(SCI_VISIBLEFROMDOCLINE,2));
+        auto waitForScroll=[&](int line) {
+            auto deadline=system_time()+5000000;
+            do { window->Unlock();snooze(50000);if(!window->Lock()) throw std::runtime_error("Diff window closed"); }
+            while((diff->Left()->SendMessage(SCI_GETFIRSTVISIBLELINE)!=line || diff->Right()->SendMessage(SCI_GETFIRSTVISIBLELINE)!=line) && system_time()<deadline);
+            CHECK(diff->Left()->SendMessage(SCI_GETFIRSTVISIBLELINE)==line);CHECK(diff->Right()->SendMessage(SCI_GETFIRSTVISIBLELINE)==line);
+        };
+        diff->Right()->SendMessage(SCI_SETFIRSTVISIBLELINE,50);waitForScroll(50);
+        diff->Left()->SendMessage(SCI_SETFIRSTVISIBLELINE,20);waitForScroll(20);
+        diff->Clear("Waiting for another revision");CHECK(!diff->Model());CHECK(diff->Left()->Text().empty() && diff->Right()->Text().empty());window->Quit();
+
+        auto gitRoot=base+"/git-diff-project";fs::create_directories(gitRoot);GitRepository git(gitRoot);
+        auto run=[&](std::vector<std::string> args) { auto result=git.Run(args);if(!result.ok()) throw std::runtime_error(result.diagnostic());return result.output; };
+        run({"init","-q"});run({"config","user.name","Kiri Test"});run({"config","user.email","kiri@example.invalid"});
+        {std::ofstream(gitRoot+"/a.txt")<<"original a\n";std::ofstream(gitRoot+"/b.txt")<<"original b\n";}
+        run({"add","."});run({"commit","-qm","First"});{std::ofstream(gitRoot+"/a.txt")<<"committed a\n";}run({"add","a.txt"});run({"commit","-qm","Second"});
+        {std::ofstream(gitRoot+"/a.txt")<<"disk a\n";std::ofstream(gitRoot+"/b.txt")<<"index b\n";}run({"add","b.txt"});{std::ofstream(gitRoot+"/b.txt")<<"disk b\n";}
+        auto status=run({"status","--porcelain=v1","-z"});w=new Workspace(base+"/git-diff-settings",false);w->Show();CHECK(w->Lock());w->OpenProject(gitRoot);
+        auto* view=w->fGit;Wait(*w,[&]{return view->fFiles.size()==2 && view->fCommits.size()==2;});
+        w->fModeLayout->SetVisibleItem(int32(1));view->fCommitMessage->MakeFocus();view->fCommitMessage->TextView()->SetText("An unfinished commit message");view->fChanges->MakeFocus();
+        view->fChanges->Select(0);view->fChanges->Select(1);BMessage staged(kGitStagedDiff);view->MessageReceived(&staged);
+        Wait(*w,[&]{auto m=view->fDiff->Model();return m && m->after.path=="b.txt" && m->after.text=="index b\n";});
+        CHECK(view->fDiff->Model()->before.text=="original b\n");auto pair=view->fDiff->Model();view->fDiff->SetSideBySide(false);CHECK(view->fDiff->Model()==pair);
+        BMessage working(kGitWorktreeDiff);view->MessageReceived(&working);CHECK(!view->fDiff->Model());
+        Wait(*w,[&]{auto m=view->fDiff->Model();return m && m->after.text=="disk b\n";});CHECK(view->fDiff->Model()->before.text=="index b\n");
+        view->fHistory->Select(0);Wait(*w,[&]{auto m=view->fDiff->Model();return m && m->after.label.find("Commit ")==0;});
+        CHECK(view->fDiff->Model()->before.text=="original a\n" && view->fDiff->Model()->after.text=="committed a\n");
+        auto other=base+"/different-repository";fs::create_directories(other);CHECK(GitRepository(other).Run({"init","-q"}).ok());
+        view->LoadCommitFile(0);view->SetRepository(other);CHECK(!view->fDiff->Model());Wait(*w,[&]{return !view->fHistoryBusy;});CHECK(!view->fDiff->Model());
+        CHECK(status==run({"status","--porcelain=v1","-z"}));w->Quit();
     }
     static void SearchInput(const std::string& base) {
         auto root=base+"/search-input-project";fs::create_directories(root);
@@ -452,6 +571,6 @@ int main(int argc,char** argv) {
     }
     BApplication application("application/x-vnd.Kiri-workspace-unit-tests");
     char folder[]="/tmp/kiri-workspace-XXXXXX";auto* root=mkdtemp(folder);if(!root) return 1;
-    try { kiri::WorkspaceTestAccess::SearchInput(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
+    try { kiri::WorkspaceTestAccess::RefreshAndDiff(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::SearchInput(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<" (test files: "<<root<<")\n";return 1; }
 }

@@ -29,10 +29,16 @@ public:
     void SetRoot(const std::string& path,const DirectoryResult& listing);
     void AddListing(const std::string& parent,const DirectoryResult& listing);
     void CheckExpanded();
+    std::vector<std::string> LoadedDirectories() const;
     std::function<void(std::string)> requestDirectory;
 private:
     void OpenSelected(bool preview=false);
     void AddEntries(const DirectoryResult& listing,FileItem* parent);
+    void ClearItems();
+    void Rebuild();
+    std::string fRoot;
+    std::map<std::string,DirectoryResult> fListings;
+    std::set<std::string> fExpanded;
     Theme fTheme=Theme::Builtins()[0];
 };
 }

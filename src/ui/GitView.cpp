@@ -1,10 +1,14 @@
 #include "ui/GitView.h"
 #include "ui/Editor.h"
+#include "ui/DiffView.h"
 #include "ui/Messages.h"
 #include <Alert.h>
 #include <Button.h>
 #include <LayoutBuilder.h>
 #include <ListView.h>
+#include <MenuField.h>
+#include <MenuItem.h>
+#include <MessageFilter.h>
 #include <ScrollView.h>
 #include <SplitView.h>
 #include <String.h>
@@ -15,6 +19,15 @@
 #include <algorithm>
 namespace kiri {
 namespace {
+constexpr uint32 kCommitFile='gdfi';
+class CommitInput:public BMessageFilter {
+public:
+    explicit CommitInput(GitView* owner):BMessageFilter(B_KEY_DOWN),fOwner(owner) {}
+    filter_result Filter(BMessage* message,BHandler**) override {
+        const char* bytes=nullptr;if(message->FindString("bytes",&bytes)==B_OK && bytes && bytes[0]==B_ENTER && fOwner->Window()) { fOwner->Window()->PostMessage(kGitCommit,fOwner);return B_SKIP_MESSAGE; }return B_DISPATCH_MESSAGE;
+    }
+private:GitView* fOwner;
+};
 void ClearList(BListView* list) { while(auto* item=list->RemoveItem(int32(0))) delete item; }
 class ChangeItem:public BListItem {
 public:
@@ -60,7 +73,8 @@ GitView::GitView():BView("source control",B_WILL_DRAW) {
     fHistory=new BListView("history");fHistory->SetSelectionMessage(new BMessage(kGitHistorySelection));
     auto* changesScroll=new BScrollView("changes scroll",fChanges,0,false,true,B_NO_BORDER);
     auto* historyScroll=new BScrollView("history scroll",fHistory,0,false,true,B_NO_BORDER);
-    fCommitMessage=new BTextControl("commit","", "",new BMessage(kGitCommit));
+    fCommitMessage=new BTextControl("commit","", "",nullptr);
+    fCommitMessage->TextView()->AddFilter(new CommitInput(this));
     fCommitMessage->TextView()->SetToolTip("Commit message. Only staged changes are committed.");
     fStatus=new BStringView("git status","Open a Git project to view changes and history.");
     fHistoryTitle=new BStringView("history title","HISTORY · ALL BRANCHES");
@@ -82,10 +96,11 @@ GitView::GitView():BView("source control",B_WILL_DRAW) {
     BLayoutBuilder::Group<>(history,B_VERTICAL,5).SetInsets(8)
         .Add(fHistoryTitle).Add(historyScroll).Add(fMore);
     auto* left=new BSplitView(B_VERTICAL,5);left->AddChild(changes);left->AddChild(history);left->SetItemWeight(left->GetLayout()->ItemAt(0),.45f);left->SetItemWeight(left->GetLayout()->ItemAt(1),.55f);
-    fDiff=new Editor();fDiff->SetLanguage("changes.diff");fDiff->SetText("Select a changed file or commit to inspect its diff.\n",true);
+    fDiff=new DiffView();
+    fComparisonFile=new BMenuField("comparison file","File",new BMenu("Select a commit"));fComparisonFile->SetEnabled(false);
     auto* right=new BView("diff panel",0);
     BLayoutBuilder::Group<>(right,B_VERTICAL,0)
-        .AddGroup(B_HORIZONTAL,6).SetInsets(8,5,8,5).Add(working).Add(staged).AddGlue().End().Add(fDiff);
+        .AddGroup(B_HORIZONTAL,6).SetInsets(8,5,8,5).Add(working).Add(staged).AddGlue().End().Add(fComparisonFile).Add(fDiff);
     auto* split=new BSplitView(B_HORIZONTAL,1);split->AddChild(left);split->AddChild(right);split->SetItemWeight(split->GetLayout()->ItemAt(0),.4f);split->SetItemWeight(split->GetLayout()->ItemAt(1),.6f);
     left->SetExplicitMinSize(BSize(300,200));right->SetExplicitMinSize(BSize(150,100));
     BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(split).Add(fStatus);
@@ -94,6 +109,7 @@ GitView::~GitView() { fJobs.reset();ClearList(fChanges);ClearList(fHistory); }
 void GitView::AttachedToWindow() {
     BView::AttachedToWindow();fJobs=std::make_unique<AsyncQueue>(BMessenger(this),2);
     std::function<void(BView*)> targets=[&](BView* view) {
+        if(view==fDiff) return;
         if(auto* control=dynamic_cast<BControl*>(view)) control->SetTarget(this);
         for(int32 i=0;i<view->CountChildren();++i) targets(view->ChildAt(i));
     };targets(this);fChanges->SetTarget(this);fHistory->SetTarget(this);
@@ -105,7 +121,7 @@ void GitView::SetRepository(std::string root,const std::string& error) {
     ++fGeneration;++fDiffRequest;++fHistoryRequest;++fStatusRequest;fRoot=std::move(root);fHistoryPath.clear();fBusy=fHistoryBusy=false;
     if(fJobs) { fJobs->Cancel("status");fJobs->Cancel("history");fJobs->Cancel("diff"); }
     fFiles.clear();fCommits.clear();fGraph.Clear();ClearList(fChanges);ClearList(fHistory);
-    fDiff->SetText("Select a changed file or commit to inspect its diff.\n",true);
+    fCommitHash.clear();fCommitFiles.clear();fComparisonFile->SetEnabled(false);fDiff->Clear("Select a changed file or commit to inspect its diff.");
     fStatus->SetText(error.empty()?"This folder is not a Git repository.":error.c_str());
     fStatus->SetToolTip(error.c_str());fMore->SetEnabled(false);
     Refresh();
@@ -119,8 +135,10 @@ void GitView::Refresh() {
         return [this,generation,status=std::move(status),branch=std::move(branch)] {
             if(generation!=fStatusRequest) return;
             if(!status.ok()) { fStatus->SetText(status.diagnostic().c_str());return; }
+            auto selected=fChanges->CurrentSelection();std::string selectedPath=selected>=0 && size_t(selected)<fFiles.size()?fFiles[selected].path:"";
             fFiles=ParseGitStatus(status.output);ClearList(fChanges);
             for(auto& file:fFiles) fChanges->AddItem(new ChangeItem(file,&fTheme));
+            if(fCommitHash.empty()) { auto found=std::find_if(fFiles.begin(),fFiles.end(),[&](const auto& file){return file.path==selectedPath;});if(found!=fFiles.end()) fChanges->Select(found-fFiles.begin());else { ++fDiffRequest;fDiff->Clear("Select a changed file or commit to inspect its diff."); } }
             std::string name=branch.output;while(!name.empty() && name.back()=='\n') name.pop_back();
             fStatus->SetText((name+" · "+std::to_string(fFiles.size())+" changed files").c_str());
         };
@@ -147,18 +165,43 @@ void GitView::LoadHistory(bool more) {
     },"history",[this](const std::string& error){fHistoryBusy=false;fMore->SetEnabled(true);fStatus->SetText(error.c_str());});
 }
 void GitView::LoadDiff() {
-    int32 selected=fChanges->CurrentSelection();if(selected<0 || selected>=static_cast<int32>(fFiles.size())) return;
+    fCommitHash.clear();fCommitFiles.clear();fComparisonFile->SetEnabled(false);
+    ++fDiffRequest;fDiff->Clear("Loading file comparison…");
+    int32 selected=fChanges->CurrentSelection();if(selected<0 || selected>=static_cast<int32>(fFiles.size())) { fDiff->Clear("Select a changed file.");return; }
     auto file=fFiles[selected];auto root=fRoot;bool staged=fStaged;auto request=++fDiffRequest;
     fJobs->Submit([this,root,file,staged,request](const auto& cancel) {
-        auto result=GitRepository(root).Diff(file.path,staged,&cancel);
-        if(file.index=='?' && result.ok() && result.output.empty()) {
-            result.output="Untracked file: "+file.path+"\n\nStage this file to inspect its added-line diff.\n";
-        }
+        auto result=std::make_shared<DiffModel>(GitRepository(root).CompareFile(file,staged,&cancel));
         return [this,result=std::move(result),request] {
             if(request!=fDiffRequest) return;
-            fDiff->SetText(result.ok()?result.output:result.diagnostic(),true);
+            fDiff->SetModel(result);
         };
-    },"diff");
+    },"diff",[this,request](const std::string& error){if(request==fDiffRequest) fDiff->Clear(error);});
+}
+void GitView::LoadCommit() {
+    int32 selected=fHistory->CurrentSelection();if(selected<0 || size_t(selected)>=fCommits.size()) return;
+    fCommitHash=fCommits[selected].hash;fCommitFiles.clear();fComparisonFile->SetEnabled(false);fDiff->Clear("Reading commit files…");
+    auto hash=fCommitHash,root=fRoot;auto request=++fDiffRequest;
+    fJobs->Submit([this,hash,root,request](const auto& cancel) {
+        auto files=GitRepository(root).CommitFiles(hash,&cancel);
+        return [this,files=std::move(files),hash,request] {
+            if(request!=fDiffRequest || hash!=fCommitHash) return;
+            auto* menu=fComparisonFile->Menu();while(auto* item=menu->RemoveItem(int32(0))) delete item;
+            if(!files.error.empty()) { fDiff->Clear(files.error);return; }
+            fCommitFiles=files.files;
+            for(size_t i=0;i<fCommitFiles.size();++i) { auto* message=new BMessage(kCommitFile);message->AddInt32("file",i);message->AddString("commit",hash.c_str());message->AddInt64("generation",fGeneration);
+                auto* item=new BMenuItem(fCommitFiles[i].path.c_str(),message);item->SetTarget(this);menu->AddItem(item); }
+            fComparisonFile->SetEnabled(!fCommitFiles.empty());
+            if(fCommitFiles.empty()) fDiff->Clear("This commit has no changed files relative to its first parent.");else { menu->ItemAt(0)->SetMarked(true);LoadCommitFile(0); }
+        };
+    },"diff",[this,request](const std::string& error){if(request==fDiffRequest) fDiff->Clear(error);});
+}
+void GitView::LoadCommitFile(int index) {
+    if(index<0 || size_t(index)>=fCommitFiles.size()) return;
+    auto file=fCommitFiles[index];auto hash=fCommitHash,root=fRoot;auto request=++fDiffRequest;fDiff->Clear("Loading commit comparison…");
+    fJobs->Submit([this,file,hash,root,request](const auto& cancel) {
+        auto model=std::make_shared<DiffModel>(GitRepository(root).CompareCommitFile(file,hash,&cancel));
+        return [this,model,request] { if(request==fDiffRequest) fDiff->SetModel(model); };
+    },"diff",[this,request](const std::string& error){if(request==fDiffRequest) fDiff->Clear(error);});
 }
 void GitView::Operate(uint32 command) {
     if(fBusy || fRoot.empty() || !fJobs) return;
@@ -188,19 +231,12 @@ void GitView::MessageReceived(BMessage* message) {
         case kWorkDone:if(fJobs) fJobs->Drain();break;
         case kGitRefresh:fHistoryPath.clear();Refresh();break;
         case kGitMore:LoadHistory(true);break;
-        case kGitSelection:LoadDiff();break;
+        case kGitSelection:if(fChanges->CurrentSelection()>=0) LoadDiff();break;
         case kGitStagedDiff:fStaged=true;LoadDiff();break;
         case kGitWorktreeDiff:fStaged=false;LoadDiff();break;
         case kGitStage:case kGitUnstage:case kGitCommit:case kGitFetch:case kGitPull:case kGitPush:Operate(message->what);break;
-        case kGitHistorySelection: {
-            int32 selected=fHistory->CurrentSelection();if(selected<0 || selected>=static_cast<int32>(fCommits.size())) break;
-            auto hash=fCommits[selected].hash,root=fRoot;auto request=++fDiffRequest;
-            fJobs->Submit([this,root,hash,request](const auto& cancel) {
-                auto result=GitRepository(root).CommitDiff(hash,&cancel);
-                return [this,result=std::move(result),request] { if(request==fDiffRequest) fDiff->SetText(result.ok()?result.output:result.diagnostic(),true); };
-            },"diff");
-            break;
-        }
+        case kGitHistorySelection:LoadCommit();break;
+        case kCommitFile: { int32 file=-1;const char* hash=nullptr;int64 generation=-1;message->FindInt32("file",&file);message->FindString("commit",&hash);message->FindInt64("generation",&generation);if(hash && hash==fCommitHash && generation==fGeneration) LoadCommitFile(file);break; }
         default:BView::MessageReceived(message);
     }
 }

@@ -30,4 +30,4 @@ versioning, reconnect behavior and path mapping before attempting a full remote 
 
 ## Dependencies and review decisions
 
-This needs an architecture/feasibility goal before a feature goal. Fleet’s backend cannot be assumed reusable, and Docker/WSL integrations are not implied. [External refresh](08-external-file-refresh.md) and [tasks](33-task-runner.md) provide useful foundations.
+This needs an architecture/feasibility goal before a feature goal. Fleet’s backend cannot be assumed reusable, and Docker/WSL integrations are not implied. [External refresh](../future_features/done/08-external-file-refresh.md) and [tasks](33-task-runner.md) provide useful foundations.
