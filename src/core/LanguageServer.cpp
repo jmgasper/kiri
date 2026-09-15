@@ -22,8 +22,9 @@ void Nonblock(int fd) { fcntl(fd,F_SETFL,fcntl(fd,F_GETFL)|O_NONBLOCK); }
 }
 RpcProcess::RpcProcess(std::vector<std::string> command,std::string directory,Incoming incoming,Failure failure)
     :fIncoming(std::move(incoming)),fFailure(std::move(failure)),fThread([this,command=std::move(command),directory=std::move(directory)] { Run(command,directory); }) {}
-RpcProcess::~RpcProcess() { Stop();if(fThread.joinable()) fThread.join(); }
+RpcProcess::~RpcProcess() { Stop();Wait(); }
 void RpcProcess::Stop() { fStop=true; }
+void RpcProcess::Wait() { if(fThread.joinable()) fThread.join(); }
 void RpcProcess::Queue(Json message) {
     auto frame=RpcFramer::Frame(message);std::lock_guard<std::mutex> lock(fMutex);
     if(fStop || !fAlive) return;
@@ -174,8 +175,9 @@ void RpcProcess::Run(std::vector<std::string> command,std::string directory) {
         if(fFailure) fFailure(failure);
     }
 }
-LanguageServer::LanguageServer(std::vector<std::string> command,const std::string& root,State state,Json initializationOptions,Json configuration):fState(std::move(state)) {
-    fProcess=std::make_unique<RpcProcess>(std::move(command),root,[root,configuration](const std::string& method,const Json& params)->RpcReply {
+LanguageServer::LanguageServer(std::vector<std::string> command,const std::string& root,State state,Json initializationOptions,Json configuration,Notification notification):fState(std::move(state)),fNotification(std::move(notification)) {
+    fProcess=std::make_unique<RpcProcess>(std::move(command),root,[this,root,configuration](const std::string& method,const Json& params)->RpcReply {
+        if(method=="textDocument/publishDiagnostics" || method=="workspace/semanticTokens/refresh") { if(fNotification) fNotification(method,params);return {nullptr,{}}; }
         if(method=="workspace/configuration") {
             Json result=Json::array();
             for(const auto& item:params.value("items",Json::array())) {
@@ -195,8 +197,13 @@ LanguageServer::LanguageServer(std::vector<std::string> command,const std::strin
     },[this](const std::string& error) { fReady=false;if(fState) fState(error); });
     Json capabilities={
         {"general",{{"positionEncodings",Json::array({"utf-8","utf-16"})}}},
-        {"workspace",{{"configuration",true},{"workspaceFolders",true},{"applyEdit",false},{"workspaceEdit",{{"documentChanges",true},{"resourceOperations",Json::array()},{"failureHandling","abort"}}}}},
+        {"workspace",{{"configuration",true},{"workspaceFolders",true},{"semanticTokens",{{"refreshSupport",true}}},{"applyEdit",false},{"workspaceEdit",{{"documentChanges",true},{"resourceOperations",Json::array()},{"failureHandling","abort"}}}}},
         {"textDocument",{
+            {"publishDiagnostics",{{"versionSupport",true},{"relatedInformation",false}}},
+            {"semanticTokens",{{"dynamicRegistration",false},{"requests",{{"full",true}}},{"formats",Json::array({"relative"})},
+                {"tokenTypes",Json::array({"namespace","type","class","enum","interface","struct","typeParameter","parameter","variable","property","enumMember","event","function","method","keyword","modifier"})},
+                {"tokenModifiers",Json::array({"declaration","definition","readonly","static","deprecated","abstract","async","modification","documentation","defaultLibrary"})},
+                {"overlappingTokenSupport",false},{"multilineTokenSupport",false},{"serverCancelSupport",false}}},
             {"synchronization",{{"dynamicRegistration",false},{"didSave",true}}},
             {"rename",{{"dynamicRegistration",false},{"prepareSupport",true},{"prepareSupportDefaultBehavior",1}}},
             {"completion",{{"dynamicRegistration",false},{"contextSupport",true},{"completionItem",{
@@ -209,6 +216,7 @@ LanguageServer::LanguageServer(std::vector<std::string> command,const std::strin
         {"workspaceFolders",Json::array({{{"uri",FileURI(root)},{"name",root}}})},{"capabilities",capabilities},
         {"initializationOptions",std::move(initializationOptions)}};
     fProcess->Request("initialize",params,[this](RpcReply reply) {
+        if(fStopping) return;
         if(!reply.ok()) { if(fState) fState(reply.error);return; }
         try {
             auto capabilities=reply.result.at("capabilities");auto encoding=capabilities.value("positionEncoding",std::string("utf-16"));
@@ -218,10 +226,19 @@ LanguageServer::LanguageServer(std::vector<std::string> command,const std::strin
         } catch(const std::exception& error) { if(fState) fState(error.what()); }
     },std::chrono::seconds(30));
 }
-LanguageServer::~LanguageServer() { Stop();fProcess.reset(); }
-void LanguageServer::Stop() { if(fProcess) fProcess->Stop(); }
+LanguageServer::~LanguageServer() {
+    Stop();
+    // Initialization callbacks still use fProcess. Keep its pointer and the
+    // callback state alive until the RPC thread has finished, then destroy it.
+    if(fProcess) fProcess->Wait();
+}
+void LanguageServer::Stop() { fStopping=true;fReady=false;if(fProcess) fProcess->Stop(); }
 Json LanguageServer::Capabilities() const { std::lock_guard<std::mutex> lock(fMutex);return fCapabilities; }
 PositionEncoding LanguageServer::Encoding() const { return Capabilities().value("positionEncoding",std::string("utf-16"))=="utf-8"?PositionEncoding::UTF8:PositionEncoding::UTF16; }
+bool LanguageServer::SupportsChanges() const {
+    auto sync=Capabilities().value("textDocumentSync",Json(0));auto kind=sync.is_object()?sync.value("change",Json(0)):sync;
+    return kind==1 || kind==2;
+}
 void LanguageServer::Open(const std::string& uri,const std::string& language,int version,const std::string& text) {
     fProcess->Notify("textDocument/didOpen",{{"textDocument",{{"uri",uri},{"languageId",language},{"version",version},{"text",text}}}});
 }

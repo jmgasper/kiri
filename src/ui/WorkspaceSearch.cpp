@@ -146,7 +146,7 @@ void Workspace::ShowEditPreview(std::shared_ptr<EditPlan> plan,bool restore) {
     if(fEditWindow.IsValid()) fEditWindow.SendMessage(B_QUIT_REQUESTED);
     fEditPlan=plan;fRestoringEdit=restore;++fEditSerial;
     if(plan->files.empty()) { Notice("No changes to preview. "+plan->summary);return; }
-    auto* preview=new EditPreviewWindow(this,*plan,Theme::Builtins()[fEditorSettings.theme],restore,fEditSerial);fEditWindow=BMessenger(preview);
+    auto* preview=new EditPreviewWindow(this,*plan,fEditorSettings.Colors(),restore,fEditSerial);fEditWindow=BMessenger(preview);
     Notice(restore?"Review the files to restore.":"Review the edits and choose Apply Reviewed Changes.");
 }
 void Workspace::ApplyProjectEdit(bool restore) {

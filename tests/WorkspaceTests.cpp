@@ -6,6 +6,12 @@
 #include "ui/DiffView.h"
 #include "ui/GitView.h"
 #include "ui/Explorer.h"
+#include "ui/ProblemsView.h"
+#include "ui/PreferencesWindow.h"
+#include <MenuField.h>
+#include <MenuItem.h>
+#include <CheckBox.h>
+#include <Entry.h>
 #include <Application.h>
 #include <Button.h>
 #include <CardLayout.h>
@@ -69,11 +75,44 @@ static int LanguageFixture() {
         }
     }return 0;
 }
+static int AnalysisFixture(const std::string& mode) {
+    RpcFramer framer;std::map<std::string,Json> documents;char bytes[8192];
+    auto send=[](const Json& message) {auto wire=RpcFramer::Frame(message);size_t at=0;while(at<wire.size()) {auto count=write(STDOUT_FILENO,wire.data()+at,wire.size()-at);if(count<=0) _exit(2);at+=count;}};
+    auto publish=[&](const Json& document) {
+        auto text=document["text"].get<std::string>();Json rows=Json::array();auto at=text.find("bad");
+        if(at!=std::string::npos) rows.push_back({{"range",{{"start",PositionJSON(PositionAt(text,at))},{"end",PositionJSON(PositionAt(text,at+3))}}},{"severity",1},{"message","Deliberate bad value 日本語"},{"source","fixture"},{"code",26}});
+        Json params={{"uri",document["uri"]},{"diagnostics",rows}};if(mode!="unversioned") params["version"]=document["version"];
+        send({{"jsonrpc","2.0"},{"method","textDocument/publishDiagnostics"},{"params",params}});
+    };
+    while(auto count=read(STDIN_FILENO,bytes,sizeof(bytes))) {
+        if(count<0) return 1;
+        for(auto& message:framer.Feed(std::string_view(bytes,count))) {
+            auto method=message.value("method",std::string());auto params=message.value("params",Json::object());Json result=nullptr;
+            if(method=="exit") return 0;
+            if(method=="initialize") {
+                result={{"capabilities",{{"textDocumentSync",mode=="no-changes"?0:1},{"documentSymbolProvider",true},{"semanticTokensProvider",{{"full",true},{"legend",{{"tokenTypes",Json::array({"type","parameter","property"})},{"tokenModifiers",Json::array()}}}}}}}};
+                auto caps=params["capabilities"]["textDocument"];
+                if(caps["publishDiagnostics"]["versionSupport"]!=true || caps["semanticTokens"]["requests"]["full"]!=true) return 3;
+            }else if(method=="textDocument/didOpen") {auto doc=params["textDocument"];documents[doc["uri"]]=doc;publish(doc);}
+            else if(method=="textDocument/didChange") {auto& doc=documents[params["textDocument"]["uri"]];doc["text"]=params["contentChanges"][0]["text"];doc["version"]=params["textDocument"]["version"];publish(doc);}
+            else if(method=="textDocument/didClose") documents.erase(params["textDocument"]["uri"]);
+            else if(method=="textDocument/documentSymbol") result=Json::array();
+            else if(method=="textDocument/semanticTokens/full") {
+                auto text=documents.at(params["textDocument"]["uri"]).at("text").get<std::string>();std::vector<std::pair<size_t,int>> spans;
+                for(auto word:{std::pair<const char*,int>{"Widget",0},{"parameter",1},{"property",2}}) for(size_t at=text.find(word.first);at!=std::string::npos;at=text.find(word.first,at+1)) spans.push_back({at,word.second});
+                std::sort(spans.begin(),spans.end());Json data=Json::array();TextPosition previous{0,0};
+                for(auto span:spans) {auto position=PositionAt(text,span.first);size_t length=span.second==0?6:span.second==1?9:8;for(auto value:{position.line-previous.line,position.line==previous.line?position.character-previous.character:position.character,length,size_t(span.second),size_t(0)}) data.push_back(value);previous=position;}
+                snooze(100000);result={{"data",data}};
+            }
+            if(message.contains("id")) send({{"jsonrpc","2.0"},{"id",message["id"]},{"result",result}});
+        }
+    }return 0;
+}
 struct WorkspaceTestAccess {
     static void Wait(Workspace& w,const std::function<bool()>& ready) {
         auto until=system_time()+15000000;
         do { w.Unlock();snooze(30000);if(!w.Lock()) throw std::runtime_error("Window closed while waiting");if(ready()) return; } while(system_time()<until);
-        throw std::runtime_error("Timed out waiting for workspace operation");
+        auto* d=w.Current();throw std::runtime_error("Timed out after check "+std::to_string(checks)+"; "+(d?d->path+" · "+d->languageStatus+" · "+d->diagnosticStatus+" · "+d->semanticStatus+"; version "+std::to_string(d->serverVersion)+" revision "+std::to_string(d->serverRevision)+"/"+std::to_string(d->editor?d->editor->InputRevision():-1):"no document")+"; Problems collapsed="+std::to_string(w.fTerminalSplit->IsItemCollapsed(2))+" hidden="+std::to_string(w.fProblems->IsHidden()));
     }
     static void Open(Workspace& w,const std::string& path,bool preview=false) {
         w.OpenFile(path,1,1,true,preview);Wait(w,[&]{return w.fPendingOpen.empty();});
@@ -93,6 +132,144 @@ struct WorkspaceTestAccess {
                 CHECK(pane->tabs[i]->view->Window()==&w);
             }
         }
+    }
+    static void Analysis(const std::string& base,const std::string& executable) {
+        for(const std::string mode:{"versioned","unversioned","no-changes"}) {
+            auto root=base+"/analysis-"+mode;fs::create_directories(root);auto file=root+"/sample.ts",other=root+"/other.ts";
+            const std::string original="// 😀 日本語\nWidget parameter property; bad\n";std::ofstream(file)<<original;std::ofstream(other)<<"Widget property;\n";
+            auto* w=new Workspace(root+"/settings",false);w->Show();CHECK(w->Lock());
+            w->fLanguageTools.profiles={{"Analysis fixture","typescript","'"+executable+"' --analysis-fixture "+mode,{".ts"}}};w->fLanguageTools.completion=false;
+            w->OpenProject(root);Open(*w,file);auto id=w->Current()->id;auto* d=w->ByID(id);auto* editor=d->editor;
+            Wait(*w,[&]{return d->diagnostics.size()==1 && d->semanticTokens.size()==3;});auto at=original.find("bad");auto key=d->serverKey;auto generation=w->fLanguageGeneration;
+            CHECK(d->diagnostics[0].start==at && d->diagnostics[0].end==at+3);CHECK(editor->SendMessage(SCI_INDICATORVALUEAT,21,at));
+            CHECK(d->semanticTokens[0].role==SemanticRole::Type && d->semanticTokens[1].role==SemanticRole::Parameter && d->semanticTokens[2].role==SemanticRole::Property);
+            CHECK(!editor->Dirty());Send(*w,kToggleProblems);Wait(*w,[&]{return !w->fTerminalSplit->IsItemCollapsed(2);});CHECK(w->fProblems->Entries().size()==1);
+            Send(*w,kNextProblem);CHECK(editor->SendMessage(SCI_GETSELECTIONSTART)==int(at));CHECK(editor->SendMessage(SCI_CALLTIPACTIVE));
+            auto input=editor->InputRevision();editor->SendMessage(SCI_CHARRIGHT);CHECK(editor->InputRevision()==input);CHECK(editor->SendMessage(SCI_INDICATORVALUEAT,21,at));
+            w->SplitPane(B_HORIZONTAL);auto* mirror=w->CurrentTab()->editor;CHECK(mirror->SendMessage(SCI_INDICATORVALUEAT,21,at));
+            auto version=d->serverVersion;Json report={{"uri",d->serverURI},{"version",version},{"diagnostics",Json::array({{{"range",{{"start",PositionJSON(PositionAt(original,at))},{"end",PositionJSON(PositionAt(original,at+3))}}},{"message","Obsolete report"}}})}};
+            w->RequestSemantic(*d,*w->fServers.at(key).client);editor->SendMessage(SCI_INSERTTEXT,0,reinterpret_cast<sptr_t>("// inserted 😀\n"));
+            CHECK(!editor->SendMessage(SCI_INDICATORVALUEAT,21,at));CHECK(!mirror->SendMessage(SCI_INDICATORVALUEAT,9,original.find("Widget")));
+            w->AnalysisTick();auto serial=d->diagnosticSerial;w->LanguageNotification(key,generation,"textDocument/publishDiagnostics",report);CHECK(d->diagnosticSerial==serial && d->diagnostics.empty());
+            if(mode=="no-changes") {
+                Wait(*w,[&]{return d->diagnosticStatus.find("does not accept")!=std::string::npos;});CHECK(d->semanticTokens.empty());CHECK(editor->Dirty());w->Quit();continue;
+            }
+            Wait(*w,[&]{return d->diagnostics.size()==1 && d->semanticTokens.size()==3 && d->serverVersion>version;});
+            CHECK(d->diagnostics[0].start==editor->Text().find("bad"));CHECK(d->semanticTokens[0].start==editor->Text().find("Widget"));
+            report["version"]=d->serverVersion;editor->SendMessage(SCI_APPENDTEXT,1,reinterpret_cast<sptr_t>("x"));editor->SendMessage(SCI_UNDO);
+            w->AnalysisTick();serial=d->diagnosticSerial;w->LanguageNotification(key,generation,"textDocument/publishDiagnostics",report);CHECK(d->diagnosticSerial==serial && d->diagnostics.empty());
+            Wait(*w,[&]{return d->diagnostics.size()==1 && d->semanticVersion==d->serverVersion;});
+            at=editor->Text().find("bad");editor->ApplyEdits({{at,at+3,"good"}});
+            Wait(*w,[&]{return d->diagnosticStatus=="Diagnostics current" && d->diagnostics.empty() && d->semanticVersion==d->serverVersion;});CHECK(w->fProblems->Entries().empty());
+            BMessage preferences(kApplyPreferences);auto settings=w->fEditorSettings;settings.semanticHighlighting=false;settings.WriteTo(preferences);w->MessageReceived(&preferences);w->AnalysisTick();CHECK(d->semanticTokens.empty());CHECK(!editor->SendMessage(SCI_INDICATORVALUEAT,9,editor->Text().find("Widget")));
+            preferences.MakeEmpty();preferences.what=kApplyPreferences;settings.semanticHighlighting=true;settings.WriteTo(preferences);w->MessageReceived(&preferences);Wait(*w,[&]{return d->semanticTokens.size()==3;});
+            editor->SendMessage(SCI_UNDO);Wait(*w,[&]{return d->diagnostics.size()==1;});
+            Open(*w,other);auto otherID=w->Current()->id;Wait(*w,[&]{return w->ByID(otherID)->semanticTokens.size()==2 && d->diagnostics.size()==1;});
+            if(mode=="unversioned") {
+                auto snapshot=w->fServers.at(key).snapshotSerial;CHECK(w->DiagnosticSnapshotCurrent(key,snapshot));
+                auto* sibling=w->ByID(otherID)->editor;sibling->SendMessage(SCI_APPENDTEXT,1,reinterpret_cast<sptr_t>(" "));
+                serial=d->diagnosticSerial;report.erase("version");w->AcceptDiagnostics(key,generation,report,snapshot);CHECK(d->diagnosticSerial==serial);CHECK(!w->DiagnosticSnapshotCurrent(key,snapshot));
+                w->AnalysisTick();CHECK(d->diagnostics.empty());Wait(*w,[&]{return d->diagnostics.size()==1;});
+            }
+            version=d->serverVersion;auto oldID=id;auto staleGeneration=w->fLanguageGeneration;w->ResetLanguages();CHECK(d->diagnostics.empty() && d->semanticTokens.empty());
+            w->LanguageNotification(key,staleGeneration,"textDocument/publishDiagnostics",report);CHECK(d->diagnostics.empty());Wait(*w,[&]{return d->diagnostics.size()==1 && d->semanticTokens.size()==3;});CHECK(d->serverVersion>version);
+            version=d->serverVersion;std::vector<int64> views;for(auto& pane:w->fPanes) for(auto& tab:pane->tabs) if(tab->document==id) views.push_back(tab->id);editor->MarkSaved();for(auto view:views) CHECK(w->CloseView(view));CHECK(!w->ByID(oldID));
+            Open(*w,file);d=w->Current();Wait(*w,[&]{return d->diagnostics.size()==1 && d->semanticTokens.size()==3;});CHECK(d->id!=oldID && d->serverVersion>version);
+            report["version"]=version;serial=d->diagnosticSerial;w->LanguageNotification(d->serverKey,w->fLanguageGeneration,"textDocument/publishDiagnostics",report);CHECK(d->diagnosticSerial==serial);
+            // Crossing the language limit clears overlays while keeping editable text.
+            auto large=root+"/large.ts";std::ofstream(large)<<std::string(kLanguageBytes+1,' ');Open(*w,large);CHECK(w->Current()->languageStatus.find("8 MiB")!=std::string::npos);CHECK(w->Current()->serverKey.empty());
+            w->Current()->editor->SendMessage(SCI_APPENDTEXT,1,reinterpret_cast<sptr_t>("x"));CHECK(w->Current()->editor->Dirty());w->Quit();
+        }
+        auto root=base+"/analysis-unavailable";fs::create_directories(root);auto file=root+"/sample.ts";std::ofstream(file)<<"const value = 1;\n";
+        auto* w=new Workspace(root+"/settings",false);w->Show();CHECK(w->Lock());w->fLanguageTools.profiles={{"Missing","typescript",root+"/missing-server",{".ts"}}};w->OpenProject(root);Open(*w,file);
+        Wait(*w,[&]{return w->Current()->languageStatus.find("Install")!=std::string::npos;});CHECK(w->Current()->diagnostics.empty());auto* editor=w->Current()->editor;editor->SendMessage(SCI_APPENDTEXT,1,reinterpret_cast<sptr_t>("x"));CHECK(editor->Dirty());
+        w->fLanguageTools.profiles={{"No analysis","typescript","'"+executable+"' --language-fixture",{".ts"}}};w->ResetLanguages();
+        Wait(*w,[&]{return w->Current()->semanticStatus.find("no full semantic")!=std::string::npos && w->Current()->diagnosticStatus.find("No diagnostic report")!=std::string::npos;});CHECK(editor->Dirty() && w->Current()->diagnostics.empty());w->Quit();
+        std::cout<<"Versioned, unversioned and unsupported-change analysis lifecycles passed.\n";
+    }
+    static void RealAnalysis(const std::string& base,const std::string& installed) {
+        auto root=base+"/real-analysis",settings=root+"/settings";fs::create_directories(settings);fs::create_directory_symlink(installed+"/tools",settings+"/tools");
+        std::ofstream(root+"/tsconfig.json")<<R"({"compilerOptions":{"target":"ES2022","strict":true},"include":["*.ts"]})";
+        for(const std::string extension:{".ts",".cpp"}) {
+            auto file=root+"/example"+extension;
+            std::string source=extension==".ts"?"const face = '😀';\nclass Widget { property = 1; }\nfunction render(value: Widget, parameter: number) { return value.property + parameter; }\nlet broken: number = 'wrong';\n":
+                "const char* face = \"😀\";\nstruct Widget { int property; };\nint render(Widget value, int parameter) { return value.property + parameter; }\nint broken = \"wrong\";\n";
+            std::ofstream(file)<<source;auto* w=new Workspace(settings,false);w->Show();CHECK(w->Lock());w->fLanguageTools.completion=false;w->OpenProject(root);Open(*w,file);auto* d=w->Current();auto* editor=d->editor;
+            auto ready=[&] {return std::any_of(d->diagnostics.begin(),d->diagnostics.end(),[](const auto& item){return item.severity==1;}) && !d->semanticTokens.empty();};
+            auto deadline=system_time()+45000000;while(!ready() && system_time()<deadline) {w->Unlock();snooze(100000);CHECK(w->Lock());}
+            if(!ready()) throw std::runtime_error(extension+" real analysis: "+d->languageStatus+" / "+d->diagnosticStatus+" / "+d->semanticStatus);
+            for(auto role:{SemanticRole::Type,SemanticRole::Parameter,SemanticRole::Property}) CHECK(std::any_of(d->semanticTokens.begin(),d->semanticTokens.end(),[&](const auto& token){return token.role==role;}));
+            auto error=*std::find_if(d->diagnostics.begin(),d->diagnostics.end(),[](const auto& item){return item.severity==1;});CHECK(error.line==3);CHECK(editor->SendMessage(SCI_INDICATORVALUEAT,21,error.start));
+            Send(*w,kToggleProblems);w->JumpProblem(d->id,d->diagnosticSerial,error.start);CHECK(editor->SendMessage(SCI_GETSELECTIONSTART)==int(error.start));CHECK(editor->SendMessage(SCI_CALLTIPACTIVE));
+            auto key=d->serverKey;auto& entry=w->fServers.at(key);std::cout<<extension<<": "<<d->diagnostics.size()<<" problems, "<<d->semanticTokens.size()<<" semantic tokens, "<<(entry.unversionedDiagnostics?"immutable snapshots":"versioned reports")<<"; "<<error.message<<"\n";
+            auto quoted=extension==".ts"?"'wrong'":"\"wrong\"";auto at=source.find(quoted);editor->ApplyEdits({{at,at+7,"1"}});
+            Wait(*w,[&]{return d->diagnosticStatus=="Diagnostics current" && std::none_of(d->diagnostics.begin(),d->diagnostics.end(),[](const auto& item){return item.severity==1;}) && d->semanticVersion==d->serverVersion;});
+            CHECK(!editor->SendMessage(SCI_INDICATORVALUEAT,21,error.start));CHECK(editor->Dirty());auto fixed=editor->Text();
+            editor->SendMessage(SCI_INSERTTEXT,0,reinterpret_cast<sptr_t>("// inserted 日本語 😀\n"));CHECK(editor->State()->semanticTokens.empty());
+            Wait(*w,[&]{return !d->semanticTokens.empty() && d->semanticVersion==d->serverVersion;});CHECK(d->semanticTokens.front().start>=std::string("// inserted 日本語 😀\n").size());
+            auto other=root+"/notes.txt";std::ofstream(other)<<"Other tab\n";Open(*w,other);CHECK(editor->State()->semanticTokens.size()==d->semanticTokens.size());
+            w->ResetLanguages();CHECK(d->semanticTokens.empty() && d->diagnostics.empty());Wait(*w,[&]{return !d->semanticTokens.empty() && d->diagnosticStatus=="Diagnostics current";});CHECK(std::none_of(d->diagnostics.begin(),d->diagnostics.end(),[](const auto& item){return item.severity==1;}));
+            CHECK(editor->Text()=="// inserted 日本語 😀\n"+fixed);w->Quit();std::cout<<extension<<" error → jump → fix → clear; edit above, tab change and restart passed.\n";
+        }
+    }
+    static void Themes(const std::string& base) {
+        auto root=base+"/theme-project",settings=root+"/settings";fs::create_directories(root);auto file=root+"/sample.cpp";std::ofstream(file)<<"int original = 1;\n";
+        auto visit=[](BMessenger target,const std::function<void(BWindow&)>& action) {
+            CHECK(target.LockTargetWithTimeout(1000000)==B_OK);BLooper* looper=nullptr;target.Target(&looper);auto* window=dynamic_cast<BWindow*>(looper);CHECK(window);action(*window);looper->Unlock();
+        };
+        auto command=[](BWindow& window,uint32 what) {BMessage message(what);window.MessageReceived(&message);};
+        std::vector<std::string> ids;
+        for(int builtin:{0,1}) {
+            auto* w=new Workspace(settings,false);w->Show();CHECK(w->Lock());w->OpenProject(root);Open(*w,file);w->ApplyTheme(builtin);
+            auto* editor=w->Current()->editor;editor->SendMessage(SCI_APPENDTEXT,9,reinterpret_cast<sptr_t>("// draft\n"));editor->SendMessage(SCI_SETSEL,4,12);auto text=editor->Text(),beforeID=w->fEditorSettings.themeID;
+            auto revision=editor->InputRevision();auto previousBackground=editor->SendMessage(SCI_STYLEGETBACK,STYLE_DEFAULT);
+            w->ShowPreferences();auto preferences=w->fPreferencesWindow;
+            visit(preferences,[&](BWindow& window) {
+                command(window,'thdu');auto* color=static_cast<BTextControl*>(window.FindView("theme color"));color->SetText(builtin?"#fafafa":"#101820");command(window,'thcl');
+                auto* preview=static_cast<Editor*>(window.FindView("preferences preview"));CHECK(preview->SendMessage(SCI_STYLEGETBACK,STYLE_DEFAULT)==SciColor(builtin?rgb_color{250,250,250,255}:rgb_color{16,24,32,255}));
+                CHECK(preview->State()->semanticTokens.size()>3);CHECK(!preview->State()->diagnostics.empty());
+            });
+            CHECK(editor->SendMessage(SCI_STYLEGETBACK,STYLE_DEFAULT)==previousBackground);preferences.SendMessage(B_QUIT_REQUESTED);Wait(*w,[&]{return !preferences.IsValid();});
+            CHECK(w->fEditorSettings.themeID==beforeID && editor->Matches(text) && editor->InputRevision()==revision && editor->Dirty());CHECK(editor->SendMessage(SCI_GETANCHOR)==4 && editor->SendMessage(SCI_GETCURRENTPOS)==12);CHECK(LoadColorThemes(settings).size()==10+ids.size());
+            w->Search(true);auto search=w->fSearchWindows.back();visit(search,[&](BWindow& window){static_cast<BTextControl*>(window.FindView("query"))->SetText("original");});
+            w->ShowPreferences();preferences=w->fPreferencesWindow;
+            visit(preferences,[&](BWindow& window) {
+                command(window,'thdu');static_cast<BTextControl*>(window.FindView("theme name"))->SetText(builtin?"Morning custom":"Night custom");command(window,'thnm');
+                static_cast<BTextControl*>(window.FindView("theme color"))->SetText(builtin?"#fafafa":"#101820");command(window,'thcl');command(window,'papl');
+            });
+            Wait(*w,[&]{return bool(w->fEditorSettings.customTheme);});ids.push_back(w->fEditorSettings.themeID);CHECK(w->fEditorSettings.Colors().dark==!builtin);CHECK(ResolveColorTheme(settings,ids.back()).theme==*w->fEditorSettings.customTheme);
+            CHECK(editor->Matches(text) && editor->InputRevision()==revision && editor->Dirty());CHECK(editor->SendMessage(SCI_GETANCHOR)==4 && editor->SendMessage(SCI_GETCURRENTPOS)==12);
+            Wait(*w,[&]{bool colored=false;visit(search,[&](BWindow& window){colored=window.FindView("search panel")->ViewColor()==w->fEditorSettings.Colors().panel;CHECK(std::string(static_cast<BTextControl*>(window.FindView("query"))->Text())=="original");});return colored;});
+            visit(preferences,[&](BWindow& window) {
+                entry_ref directory;CHECK(get_ref_for_path(root.c_str(),&directory)==B_OK);BMessage exportTheme('thwr');exportTheme.AddRef("directory",&directory);exportTheme.AddString("name","export.kiri-theme.json");window.MessageReceived(&exportTheme);
+            });
+            CHECK(ReadThemeFile(root+"/export.kiri-theme.json").theme==*w->fEditorSettings.customTheme);
+            // Validation must preserve the applied palette on malformed import.
+            std::ofstream(root+"/broken.json")<<"{broken";
+            visit(preferences,[&](BWindow& window) {entry_ref ref;CHECK(get_ref_for_path((root+"/broken.json").c_str(),&ref)==B_OK);BMessage imported('thrd');imported.AddRef("refs",&ref);window.MessageReceived(&imported);CHECK(std::string(static_cast<BStringView*>(window.FindView("preferences validation"))->Text()).find("Cannot read theme")!=std::string::npos);});
+            CHECK(w->fEditorSettings.themeID==ids.back());preferences.SendMessage(B_QUIT_REQUESTED);Wait(*w,[&]{return !preferences.IsValid();});search.SendMessage(B_QUIT_REQUESTED);
+            editor->SendMessage(SCI_UNDO);CHECK(editor->Matches("int original = 1;\n") && !editor->Dirty());w->SaveSettings();CHECK(w->QuitRequested());w->Quit();
+            w=new Workspace(settings,true);w->Show();CHECK(w->Lock());Wait(*w,[&]{return !w->fRestoring;});CHECK(w->fEditorSettings.themeID==ids.back());CHECK(w->fEditorSettings.customTheme && w->fEditorSettings.Colors().dark==!builtin);CHECK(w->Current()->editor->Matches("int original = 1;\n"));w->Quit();
+        }
+        // Incomplete import uses the specified base and does not alter disk until Apply.
+        auto value=Json::parse(SerializeTheme(BuiltinColorThemes()[1]));value["id"]=NewThemeID();value["name"]="Incomplete";value["colors"]={{"accent","#a00060"}};std::ofstream(root+"/incomplete.json")<<value.dump();
+        auto* w=new Workspace(settings,false);w->Show();CHECK(w->Lock());w->ShowPreferences();auto preferences=w->fPreferencesWindow;
+        visit(preferences,[&](BWindow& window){entry_ref ref;CHECK(get_ref_for_path((root+"/incomplete.json").c_str(),&ref)==B_OK);BMessage imported('thrd');imported.AddRef("refs",&ref);window.MessageReceived(&imported);CHECK(std::string(static_cast<BStringView*>(window.FindView("preferences validation"))->Text()).find("Missing colors")!=std::string::npos);command(window,'papl');});
+        Wait(*w,[&]{return w->fEditorSettings.themeID==value["id"];});CHECK(w->fEditorSettings.customTheme->colors.at("background")==BuiltinColorThemes()[1].colors.at("background"));
+        auto removed=w->fEditorSettings.themeID;preferences.SendMessage(B_QUIT_REQUESTED);Wait(*w,[&]{return !preferences.IsValid();});w->SaveSettings();w->Quit();fs::remove(settings+"/themes/"+removed+".json");
+        w=new Workspace(settings,true);w->Show();CHECK(w->Lock());Wait(*w,[&]{return !w->fRestoring;});CHECK(w->fEditorSettings.themeID==removed && !w->fEditorSettings.customTheme);CHECK(w->fEditorSettings.Colors().definition.id=="kiri.obsidian" && !w->fEditorSettings.themeStatus.empty());w->Quit();
+        std::cout<<"Custom dark/light theme preview, Cancel, Apply, export, import and restart passed.\n";
+    }
+    static void AnalysisRendering() {
+        auto* window=new BWindow(BRect(40,40,1000,600),"Analysis rendering benchmark",B_TITLED_WINDOW,0);auto* editor=new Editor();BLayoutBuilder::Group<>(window,B_VERTICAL,0).Add(editor);window->Show();CHECK(window->Lock());
+        std::string text;std::vector<SemanticToken> tokens;const std::string line="Type parameter property; // 😀 benchmark padding.........................................\n";
+        while(text.size()+line.size()<=kLanguageBytes) {tokens.push_back({text.size(),text.size()+4,SemanticRole::Type,false});text+=line;}text.resize(kLanguageBytes,' ');
+        editor->SetText(text);editor->SetLanguage("sample.cpp");auto start=system_time();editor->SetSemanticTokens(tokens);auto painted=system_time();
+        CHECK(editor->SendMessage(SCI_INDICATORVALUEAT,9,tokens.back().start));CHECK(!editor->Dirty());window->Unlock();snooze(100000);CHECK(window->Lock());window->UpdateIfNeeded();auto realized=system_time();
+        CHECK(editor->SendMessage(SCI_GETSTYLEAT,0)>=0);start=painted-start;
+        auto cleared=system_time();editor->SendMessage(SCI_INSERTTEXT,0,reinterpret_cast<sptr_t>("x"));auto editTime=system_time()-cleared;
+        CHECK(!editor->SendMessage(SCI_INDICATORVALUEAT,9,tokens.back().start));CHECK(editor->Dirty());CHECK(editor->SendMessage(SCI_GETLENGTH)==int(kLanguageBytes+1));CHECK(start<3000000 && editTime<1000000);
+        std::cout<<"8 MiB native semantic indicators: "<<tokens.size()<<" tokens, apply="<<start/1000.0<<" ms, visible paint (including 100 ms settle)="<<(realized-painted)/1000.0<<" ms, clear/edit="<<editTime/1000.0<<" ms\n";window->Quit();
     }
     static void DragTabs(const std::string& root) {
         auto settings=root+"/drag-settings",a=root+"/one.txt",b=root+"/two.txt",c=root+"/four.txt";
@@ -564,6 +741,7 @@ struct WorkspaceTestAccess {
 }
 int main(int argc,char** argv) {
     signal(SIGPIPE,SIG_IGN);
+    if(argc>2 && std::string(argv[1])=="--analysis-fixture") return kiri::AnalysisFixture(argv[2]);
     if(argc>1 && std::string(argv[1])=="--language-fixture") return kiri::LanguageFixture();
     if(argc>1 && std::string(argv[1])=="--format-fixture") {
         std::string text((std::istreambuf_iterator<char>(std::cin)),{});snooze(180000);
@@ -571,6 +749,6 @@ int main(int argc,char** argv) {
     }
     BApplication application("application/x-vnd.Kiri-workspace-unit-tests");
     char folder[]="/tmp/kiri-workspace-XXXXXX";auto* root=mkdtemp(folder);if(!root) return 1;
-    try { kiri::WorkspaceTestAccess::RefreshAndDiff(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::SearchInput(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
+    try { if(argc==2 && std::string(argv[1])=="--analysis") {kiri::WorkspaceTestAccess::Analysis(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" analysis workspace checks.\n";return 0;}if(argc==3 && std::string(argv[1])=="--real-analysis") {kiri::WorkspaceTestAccess::RealAnalysis(kiri::CanonicalPath(root),argv[2]);fs::remove_all(root);std::cout<<"Passed "<<checks<<" real analysis checks.\n";return 0;}kiri::WorkspaceTestAccess::Themes(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::AnalysisRendering();kiri::WorkspaceTestAccess::Analysis(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::RefreshAndDiff(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::SearchInput(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<" (test files: "<<root<<")\n";return 1; }
 }

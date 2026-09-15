@@ -61,7 +61,8 @@ public:
             }
         });
     }
-    ~AsyncQueue() {
+    ~AsyncQueue() { StopAndWait(); }
+    void StopAndWait() {
         { std::lock_guard<std::mutex> lock(fMutex);fStop=true;
           for(auto& job:fWork) job->cancelled=true;
           for(auto& job:fRunning) job->cancelled=true; }

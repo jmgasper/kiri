@@ -22,6 +22,7 @@ public:
     void Notify(const std::string& method,Json params);
     void Cancel(int64_t id);
     void Stop();
+    void Wait();
 private:
     struct Pending { Callback callback;std::chrono::steady_clock::time_point deadline; };
     void Run(std::vector<std::string> command,std::string directory);
@@ -41,12 +42,14 @@ class LanguageServer {
 public:
     using Callback=RpcProcess::Callback;
     using State=std::function<void(const std::string&)>;
+    using Notification=std::function<void(const std::string&,const Json&)>;
     LanguageServer(std::vector<std::string> command,const std::string& root,State state,
-        Json initializationOptions=Json::object(),Json configuration=Json::object());
+        Json initializationOptions=Json::object(),Json configuration=Json::object(),Notification notification={});
     ~LanguageServer();
-    bool Ready() const { return fReady.load(); }
+    bool Ready() const { return !fStopping.load() && fReady.load(); }
     Json Capabilities() const;
     PositionEncoding Encoding() const;
+    bool SupportsChanges() const;
     void Open(const std::string& uri,const std::string& language,int version,const std::string& text);
     void Change(const std::string& uri,int version,const std::string& before,const std::string& after);
     void Save(const std::string& uri,const std::string& text);
@@ -55,10 +58,11 @@ public:
     void Cancel(int64_t id);
     void Stop();
 private:
-    std::atomic<bool> fReady{false};
+    std::atomic<bool> fReady{false},fStopping{false};
     mutable std::mutex fMutex;
     Json fCapabilities;
     State fState;
+    Notification fNotification;
     std::unique_ptr<RpcProcess> fProcess;
 };
 }

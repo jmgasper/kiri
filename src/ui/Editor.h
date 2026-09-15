@@ -4,6 +4,7 @@
 #include "ui/EditorSettings.h"
 #include "core/LanguageProtocol.h"
 #include "core/Search.h"
+#include "core/LanguageAnalysis.h"
 #include <string>
 #include <ILoader.h>
 #include <memory>
@@ -11,7 +12,11 @@ namespace kiri {
 // Scintilla owns the text and undo stack through each attached view's document
 // reference. This state follows that same buffer, including synchronous input
 // revisions (Haiku delivers Scintilla's notifications asynchronously).
-struct EditorState { int64 revision=0,inputRevision=0,changes=0;bool recovered=false; };
+struct EditorState {
+    int64 revision=0,inputRevision=0,changes=0;bool recovered=false;
+    std::vector<Diagnostic> diagnostics;
+    std::vector<SemanticToken> semanticTokens;
+};
 struct EditorLoader {
     Scintilla::ILoader* loader=nullptr;
     ~EditorLoader() { if(loader) loader->Release(); }
@@ -32,7 +37,11 @@ public:
     void Adopt(EditorLoader& loader,int eol=2);
     void ShareDocument(Editor& source);
     std::shared_ptr<EditorState> State() const { return fState; }
-    void NoteInput() { ++fState->revision;++fState->inputRevision; }
+    void NoteInput();
+    void SetDiagnostics(const std::vector<Diagnostic>& diagnostics);
+    void SetSemanticTokens(const std::vector<SemanticToken>& tokens);
+    void ClearAnalysis();
+    void ShowDiagnostic(size_t position);
     int64 InputRevision() const { return fState->inputRevision; }
     std::string Text();
     bool Matches(std::string_view text);

@@ -56,10 +56,10 @@ public:
             owner->PushState();owner->SetDrawingMode(B_OP_ALPHA);owner->SetBlendingMode(B_PIXEL_ALPHA,B_ALPHA_OVERLAY);
             owner->DrawBitmap(fIcon.get(),BPoint(frame.left+12,frame.top+(Height()-16)/2));owner->PopState();
         }
-        owner->SetFont(be_bold_font);owner->SetHighColor(fTheme.text);
+        owner->SetFont(be_bold_font);owner->SetHighColor(IsSelected()?fTheme.selectionText:fTheme.text);
         BString label(name.c_str());owner->TruncateString(&label,B_TRUNCATE_MIDDLE,frame.Width()-55);
         owner->DrawString(label.String(),BPoint(frame.left+40,frame.top+Height()/2-3));
-        owner->SetFont(be_plain_font);owner->SetHighColor(fTheme.muted);
+        owner->SetFont(be_plain_font);owner->SetHighColor(IsSelected()?fTheme.selectionText:fTheme.muted);
         BString detail((std::string(fItem.folder?"Folder  ·  ":"File  ·  ")+path.parent_path().string()).c_str());
         owner->TruncateString(&detail,B_TRUNCATE_MIDDLE,frame.Width()-55);
         owner->DrawString(detail.String(),BPoint(frame.left+40,frame.top+Height()/2+15));
@@ -116,7 +116,7 @@ void LauncherWindow::Refresh() {
     std::string selected;auto index=fRecents->CurrentSelection();if(index>=0 && index<static_cast<int32>(fItems.size())) selected=fItems[index].path;
     while(auto* item=fRecents->RemoveItem(int32(0))) delete item;
     BFile file((fSettings+"/settings").c_str(),B_READ_ONLY);BMessage stored;stored.Unflatten(&file);
-    EditorSettings settings;settings.ReadFrom(stored);const auto& theme=Theme::Builtins()[settings.theme];
+    EditorSettings settings;settings.ReadFrom(stored,fSettings);const auto& theme=settings.Colors();
     for(int32 i=0;i<CountChildren();++i) ThemeView(ChildAt(i),theme);
     for(const char* name:{"launcher open folder","launcher open file","launcher new file","open recent"})
         static_cast<ActionButton*>(FindView(name))->ApplyTheme(theme);

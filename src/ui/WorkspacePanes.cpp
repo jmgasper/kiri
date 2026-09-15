@@ -27,7 +27,7 @@ Workspace::Pane* Workspace::CreatePane() {
         .AddGlue();
     pane->cards->AddView(welcome);pane->panel=new BView("editor pane",0);
     BLayoutBuilder::Group<>(pane->panel,B_VERTICAL,0).Add(pane->strip).Add(host);
-    ThemeView(pane->panel,Theme::Builtins()[fEditorSettings.theme]);pane->strip->ApplyTheme(Theme::Builtins()[fEditorSettings.theme]);
+    ThemeView(pane->panel,fEditorSettings.Colors());pane->strip->ApplyTheme(fEditorSettings.Colors());
     auto* result=pane.get();fPanes.push_back(std::move(pane));return result;
 }
 Workspace::Pane* Workspace::FindPane(int64 id) { for(auto& pane:fPanes) if(pane->id==id) return pane.get();return nullptr; }
@@ -128,7 +128,7 @@ void Workspace::SplitPane(orientation direction) {
     node->first=std::make_unique<LayoutNode>();node->first->pane=old;node->second=std::make_unique<LayoutNode>();node->second->pane=pane;
     node->split->AddChild(old->panel,1.f);node->split->AddChild(pane->panel,1.f);layout->AddView(index,node->split);
     if(parentSplit) parentSplit->SetItemWeight(index,weight,true);
-    ThemeView(node->split,Theme::Builtins()[fEditorSettings.theme]);
+    ThemeView(node->split,fEditorSettings.Colors());
     if(source) { if(auto* tab=CurrentTab()) tab->preview=false;AddTab(*pane,*source); }
     ActivatePane(pane,true);SaveSettings();
 }
@@ -335,7 +335,7 @@ void Workspace::RestoreLayout() {
     for(auto& d:fDocuments) if(!ViewCount(d->id)) AddTab(*fActivePane,*d);
     old->View()->RemoveSelf();fPaneHost->GetLayout()->AddView(fLayout->View());
     for(auto& d:fDocuments) RefreshRepresentative(*d);
-    delete old->View();ThemeView(fLayout->View(),Theme::Builtins()[fEditorSettings.theme]);ActivatePane(fActivePane,true);
+    delete old->View();ThemeView(fLayout->View(),fEditorSettings.Colors());ActivatePane(fActivePane,true);
     // Realize the new pane sizes and wrapping before restoring scroll offsets.
     // Focusing the selected view can also scroll its caret into view.
     UpdateIfNeeded();

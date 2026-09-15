@@ -22,7 +22,15 @@ public:
     filter_result Filter(BMessage* message,BHandler**) override {
         if(fEditor->FilterLanguageKey(message)) return B_SKIP_MESSAGE;
         switch(message->what) {
-            case B_KEY_DOWN:case B_UNMAPPED_KEY_DOWN:case B_INPUT_METHOD_EVENT:
+            case B_KEY_DOWN: {
+                const char* bytes=nullptr;int32 modifiers=0;message->FindInt32("modifiers",&modifiers);
+                if(message->FindString("bytes",&bytes)==B_OK && bytes && *bytes) {
+                    auto c=static_cast<unsigned char>(*bytes);
+                    if(c==B_BACKSPACE || c==B_DELETE || c==B_ENTER || c==B_TAB || (c>=32 && !(modifiers&(B_COMMAND_KEY|B_CONTROL_KEY)))) fEditor->NoteInput();
+                }
+                break;
+            }
+            case B_INPUT_METHOD_EVENT:
             case B_CUT:case B_PASTE:case B_UNDO:case B_REDO:case B_SIMPLE_DATA:fEditor->NoteInput();break;
             default:if(message->WasDropped()) fEditor->NoteInput();break;
         }
@@ -58,6 +66,7 @@ Editor::Editor():BScintillaView("source",B_FRAME_EVENTS,true,true,B_NO_BORDER) {
     SendMessage(SCI_SETCARETWIDTH,2);SendMessage(SCI_SETCARETLINEVISIBLE,1);
     SendMessage(SCI_SETINDENTATIONGUIDES,SC_IV_LOOKBOTH);
     SendMessage(SCI_USEPOPUP,0);
+    SendMessage(SCI_SETMOUSEDWELLTIME,500);
     ApplyTheme(fTheme);
     SendMessage(SCI_AUTOCSETSEPARATOR,'\n');SendMessage(SCI_AUTOCSETTYPESEPARATOR,31);SendMessage(SCI_AUTOCSETORDER,SC_ORDER_CUSTOM);
     SendMessage(SCI_AUTOCSETMAXHEIGHT,10);SendMessage(SCI_AUTOCSETMAXWIDTH,80);
@@ -95,7 +104,11 @@ void Editor::ApplyTheme(const Theme& t) {
     SendMessage(SCI_STYLESETFORE,STYLE_DEFAULT,SciColor(t.text));
     SendMessage(SCI_STYLESETBACK,STYLE_DEFAULT,SciColor(t.background));
     SendMessage(SCI_STYLECLEARALL);
-    SendMessage(SCI_SETSELFORE,1,SciColor(t.text));SendMessage(SCI_SETSELBACK,1,SciColor(t.selection));
+    SendMessage(SCI_SETSELFORE,1,SciColor(t.selectionText));SendMessage(SCI_SETSELBACK,1,SciColor(t.selection));
+    for(int i=0;i<8;++i) {SendMessage(SCI_INDICSETSTYLE,9+i,INDIC_TEXTFORE);SendMessage(SCI_INDICSETFORE,9+i,SciColor(t.semantic[i]));}
+    SendMessage(SCI_INDICSETSTYLE,17,INDIC_STRIKE);SendMessage(SCI_INDICSETFORE,17,SciColor(t.muted));
+    for(int i=0;i<4;++i) {SendMessage(SCI_INDICSETSTYLE,21+i,INDIC_SQUIGGLE);SendMessage(SCI_INDICSETFORE,21+i,SciColor(t.diagnostic[i]));}
+    SendMessage(SCI_CALLTIPSETFORE,SciColor(t.text));SendMessage(SCI_CALLTIPSETBACK,SciColor(t.panel));
     SendMessage(SCI_SETCARETFORE,SciColor(t.accent));SendMessage(SCI_SETCARETLINEBACK,SciColor(t.line));
     SendMessage(SCI_STYLESETBACK,STYLE_LINENUMBER,SciColor(t.background));Style(STYLE_LINENUMBER,t.muted);
     SendMessage(SCI_SETFOLDMARGINCOLOUR,1,SciColor(t.background));
@@ -148,7 +161,7 @@ void Editor::ApplyTheme(const Theme& t) {
 }
 void Editor::ApplySettings(const EditorSettings& settings) {
     fSettings=settings;
-    ApplyTheme(Theme::Builtins()[settings.theme]);
+    ApplyTheme(settings.Colors());
 }
 void Editor::UpdateMarginWidth() {
     fDigits=std::to_string(SendMessage(SCI_GETLINECOUNT)).size();
@@ -282,6 +295,8 @@ bool Editor::FilterLanguageKey(BMessage* message) {
 void Editor::NotificationReceived(SCNotification* n) {
     if(!fLoading && n->nmhdr.code==SCN_MODIFIED && (n->modificationType&(SC_MOD_INSERTTEXT|SC_MOD_DELETETEXT))) { ++fState->revision;++fState->changes; }
     if(fLoading || !Window()) return;
+    if(n->nmhdr.code==SCN_DWELLSTART && n->position>=0) ShowDiagnostic(n->position);
+    if(n->nmhdr.code==SCN_DWELLEND) SendMessage(SCI_CALLTIPCANCEL);
     if(n->nmhdr.code==SCN_FOCUSIN) { BMessage message(kEditorFocus);message.AddPointer("editor",this);Window()->PostMessage(&message); }
     if(n->nmhdr.code==SCN_MODIFIED && (n->modificationType&(SC_MOD_INSERTTEXT|SC_MOD_DELETETEXT))) {
         BMessage message(kEditorText);message.AddPointer("editor",this);Window()->PostMessage(&message);

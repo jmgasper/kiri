@@ -1,5 +1,42 @@
 # Verification record
 
+## Diagnostics, semantic highlighting and custom themes — develop
+
+Verified September 15, 2026 on Linux and Haiku R1/beta5 in the existing QEMU VM.
+All five CMake/CTest suites passed. Haiku passed 166 core checks, 94 search/edit
+checks, 3,675 refresh/diff checks, 82 analysis/theme checks, 266 native editor/worker
+checks, 84 language transport checks and 609 workspace checks. Real Prettier,
+TypeScript and clangd runs passed 125 language checks. Additional real-server
+workspace checks showed, selected, fixed and cleared deliberate TypeScript and
+C++ errors, then verified editing above tokens, switching tabs and restarting.
+Both servers supplied distinct type, parameter and property colors.
+
+Diagnostics and full semantic tokens use independent Scintilla indicators over
+Lexilla. Tests cover Unicode positions, limits, malformed reports, stale and
+out-of-order work, undo back to identical text, shared panes, closure/reopening,
+server restart and unavailable capabilities. Unversioned TypeScript diagnostics
+use immutable analysis sessions; their startup and memory tradeoff is documented.
+A native rerun exposed a server-initialization/shutdown race. The transport now
+joins callbacks before releasing its pointer, and the workspace retains its
+worker queue while retired servers stop. A regression test holds an initialization
+callback across destruction; additional handshakes are stopped at varied points.
+
+Custom light and dark themes pass Preview/Cancel, Apply, export/import and restart
+checks while preserving text, selection, dirty state and undo. Incomplete imports
+inherit a named base; invalid input is rejected. Stable IDs retain selection
+across sorting, and missing files fall back to Obsidian. Native inspection checks
+editor, Problems, preferences, search, launcher, terminal and Git surfaces.
+Terminal palette tests include previously drawn text and scrollback.
+
+The optimized Haiku decoder processed an 8 MiB, 91,180-token fixture in about
+30 ms. Applying its indicators took 114–123 ms; clearing them during an edit took
+about 8 ms. Larger files stay editable through the existing large-file path.
+
+See [language analysis](LANGUAGE_ANALYSIS.md), [custom themes](CUSTOM_THEMES.md),
+and completed requirements [26](future_features/done/26-diagnostics.md),
+[31](future_features/done/31-semantic-highlighting.md) and
+[20](future_features/done/20-custom-themes.md).
+
 ## External refresh and side-by-side diffs — develop
 
 Verified September 15, 2026 on Linux and in the existing Haiku R1/beta5 QEMU VM.

@@ -30,4 +30,4 @@ Begin with quick fixes and organize imports; advertise only the kinds actually i
 
 ## Dependencies and review decisions
 
-Depends on [diagnostics](26-diagnostics.md) for problem-driven entry points and the transaction layer described in [rename](../future_features/done/29-symbol-rename.md). Server commands may execute project tooling; define the user-triggered execution boundary explicitly.
+Depends on [diagnostics](../future_features/done/26-diagnostics.md) for problem-driven entry points and the transaction layer described in [rename](../future_features/done/29-symbol-rename.md). Server commands may execute project tooling; define the user-triggered execution boundary explicitly.

@@ -135,10 +135,13 @@ void Terminal() {
     TerminalModel model(3,20,5);
     std::string data="hello\r\n\x1b[31mred\x1b[0m";model.Feed(data.data(),data.size());
     CHECK(model.Text(0,1)=="hello\nred");auto red=model.Cell(1,0);CHECK(red.chars[0]=='r');CHECK(VTERM_COLOR_IS_INDEXED(&red.fg));
+    model.Colors(0x123456,0xfedcba);auto defaults=model.Cell(0,0);CHECK(defaults.fg.rgb.red==0x12 && defaults.fg.rgb.green==0x34 && defaults.bg.rgb.blue==0xba);
+    std::array<uint32_t,16> palette{};palette[1]=0xabcdef;model.Palette(palette);red=model.Cell(1,0);vterm_screen_convert_color_to_rgb(model.Screen(),&red.fg);CHECK(red.fg.rgb.red==0xab && red.fg.rgb.blue==0xef);
     data="\x1b[?1049h\x1b[HALT";model.Feed(data.data(),data.size());CHECK(model.AlternateScreen());CHECK(model.Text(0,0)=="ALT");
     data="\x1b[?1049l";model.Feed(data.data(),data.size());CHECK(!model.AlternateScreen());CHECK(model.Text(0,0)=="hello");
     for(int n=0;n<12;++n) { data="\r\nline "+std::to_string(n);model.Feed(data.data(),data.size()); }
     CHECK(model.ScrollbackSize()==5);
+    model.Colors(0x654321,0x102030);auto history=model.Cell(0,0,3);CHECK(history.fg.rgb.red==0x65 && history.bg.rgb.blue==0x30);
     model.Resize(4,30);CHECK(model.Rows()==4);CHECK(model.Columns()==30);
     model.Character('c',VTERM_MOD_CTRL);CHECK(model.TakeOutput()==std::string(1,3));
     data="\x1b[?2004h";model.Feed(data.data(),data.size());model.Paste("one\ntwo");CHECK(model.TakeOutput()=="\x1b[200~one\ntwo\x1b[201~");

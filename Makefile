@@ -34,15 +34,18 @@ $(BUILD)/kiri_search_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/tests/SearchTests.
 	$(CXX) -o $@ $^ -lbe -lpcre2-8
 $(BUILD)/kiri_refresh_diff_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/tests/RefreshDiffTests.o
 	$(CXX) -o $@ $^ -lbe -lpcre2-8
-check: $(BUILD)/kiri_tests $(BUILD)/kiri_search_tests $(BUILD)/kiri_refresh_diff_tests
+$(BUILD)/kiri_analysis_theme_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/tests/AnalysisThemeTests.o
+	$(CXX) -o $@ $^ -lbe -lpcre2-8
+check: $(BUILD)/kiri_analysis_theme_tests $(BUILD)/kiri_tests $(BUILD)/kiri_search_tests $(BUILD)/kiri_refresh_diff_tests
 	$(BUILD)/kiri_tests
 	$(BUILD)/kiri_search_tests
 	$(BUILD)/kiri_refresh_diff_tests
+	$(BUILD)/kiri_analysis_theme_tests
 $(BUILD)/kiri_language_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/tests/LanguageTests.o
 	$(CXX) -o $@ $^ -lbe -lpcre2-8
 check-language: $(BUILD)/kiri_language_tests
 	$(BUILD)/kiri_language_tests
-$(BUILD)/kiri_native_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/src/ui/Editor.o $(BUILD)/src/ui/Theme.o $(BUILD)/src/ui/EditorSettings.o $(BUILD)/src/ui/FileIcons.o $(BUILD)/src/ui/RecentItems.o $(BUILD)/tests/NativeTests.o
+$(BUILD)/kiri_native_tests: $(CORE_OBJ) $(VTERM_OBJ) $(BUILD)/src/ui/Editor.o $(BUILD)/src/ui/EditorAnalysis.o $(BUILD)/src/ui/Theme.o $(BUILD)/src/ui/EditorSettings.o $(BUILD)/src/ui/FileIcons.o $(BUILD)/src/ui/RecentItems.o $(BUILD)/tests/NativeTests.o
 	$(CXX) -o $@ $^ $(LIBS)
 check-native: $(BUILD)/kiri_native_tests
 	$(BUILD)/kiri_native_tests
@@ -62,4 +65,4 @@ package: all
 	bash tools/package-haiku.sh
 clean:
 	rm -rf $(BUILD)
--include $(CORE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(VTERM_OBJ:.o=.d) $(BUILD)/tests/CoreTests.d $(BUILD)/tests/NativeTests.d $(BUILD)/tests/WorkspaceSmoke.d $(BUILD)/tests/LauncherSmoke.d $(BUILD)/tests/LanguageTests.d $(BUILD)/tests/WorkspaceTests.d $(BUILD)/tests/SearchTests.d $(BUILD)/tests/RefreshDiffTests.d
+-include $(CORE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(VTERM_OBJ:.o=.d) $(BUILD)/tests/CoreTests.d $(BUILD)/tests/NativeTests.d $(BUILD)/tests/WorkspaceSmoke.d $(BUILD)/tests/LauncherSmoke.d $(BUILD)/tests/LanguageTests.d $(BUILD)/tests/WorkspaceTests.d $(BUILD)/tests/SearchTests.d $(BUILD)/tests/RefreshDiffTests.d $(BUILD)/tests/AnalysisThemeTests.d

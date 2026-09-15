@@ -73,6 +73,7 @@ void EditPreviewWindow::Detail() {
     fDetail->SetText(detail.c_str());
 }
 void EditPreviewWindow::MessageReceived(BMessage* message) {
+    if(message->what==kWindowTheme) {ThemeWindow(this,*message);return;}
     if(message->what==kEditSelect) Detail();
     else if(message->what==kEditToggle && !fBusy && !fRestore && !fPlan.rename) {
         auto row=fList->CurrentSelection();if(row<0 || size_t(row)>=fRows.size()) return;

@@ -173,6 +173,25 @@ static void Transport(const std::string& executable) {
         CHECK(!Throws([&]{client.Notify("invalid",std::string("\xff",1));}));CHECK(failed);
     }
 }
+static void ShutdownDuringInitialization(const std::string& executable) {
+    Temp temp;
+    // Keep an initialization callback alive while destruction starts. Callbacks
+    // may use their transport until shutdown has joined the RPC thread.
+    std::promise<void> entered,release;auto released=release.get_future().share();std::atomic<bool> destroying{false},finished{false};
+    LanguageServer* raw=nullptr;
+    auto server=std::make_unique<LanguageServer>(std::vector<std::string>{executable,"--rpc-fixture","normal"},temp.path,[&](const std::string& error) {
+        if(!error.empty()) return;entered.set_value();released.wait();
+        raw->Request("echo",Json::object(),[](RpcReply){});
+    });raw=server.get();CHECK(entered.get_future().wait_for(3s)==std::future_status::ready);
+    std::thread stop([&]{destroying=true;server.reset();finished=true;});while(!destroying) std::this_thread::yield();std::this_thread::sleep_for(20ms);
+    CHECK(!finished);release.set_value();stop.join();CHECK(finished);
+    // Exercise immediate replacement at varying points in the handshake too.
+    for(int i=0;i<20;++i) {
+        auto client=std::make_unique<LanguageServer>(std::vector<std::string>{executable,"--rpc-fixture","normal"},temp.path,[](const std::string&){});
+        std::this_thread::sleep_for(std::chrono::microseconds(i*500));client.reset();
+    }
+    CHECK(true);
+}
 static void RealTools(const std::string& settings) {
     Temp temp;std::string project=temp.path+"/project with spaces";fs::create_directory(project);
     Write(project+"/.prettierrc","{\"singleQuote\":true,\"semi\":false}\n");Write(project+"/.prettierignore","ignored.js\n");
@@ -250,7 +269,7 @@ int main(int argc,char** argv) {
     signal(SIGPIPE,SIG_IGN);
     if(argc>=3 && std::string(argv[1])=="--rpc-fixture") return Fixture(argv[2]);
     try {
-        FramingAndPositions();EditsAndSymbols();Configuration();Transport(CanonicalPath(argv[0]));
+        FramingAndPositions();EditsAndSymbols();Configuration();Transport(CanonicalPath(argv[0]));ShutdownDuringInitialization(CanonicalPath(argv[0]));
         if(argc==3 && std::string(argv[1])=="--tools") RealTools(CanonicalPath(argv[2]));
         std::cout<<checks<<" language checks passed\n";return 0;
     } catch(const std::exception& error) { std::cerr<<error.what()<<"\n";return 1; }

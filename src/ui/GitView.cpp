@@ -37,7 +37,7 @@ public:
         const auto& t=*fTheme;owner->SetHighColor(IsSelected()?t.selection:t.panel);owner->FillRect(rect);owner->SetLowColor(IsSelected()?t.selection:t.panel);
         std::string status;status+=fFile.index;status+=fFile.worktree;
         owner->SetHighColor(fFile.index!=' ' && fFile.index!='?'?t.added:t.number);owner->DrawString(status.c_str(),BPoint(rect.left+8,rect.top+19));
-        owner->SetHighColor(t.text);BString path(fFile.path.c_str());owner->TruncateString(&path,B_TRUNCATE_MIDDLE,rect.Width()-47);owner->DrawString(path.String(),BPoint(rect.left+38,rect.top+19));
+        owner->SetHighColor(IsSelected()?t.selectionText:t.text);BString path(fFile.path.c_str());owner->TruncateString(&path,B_TRUNCATE_MIDDLE,rect.Width()-47);owner->DrawString(path.String(),BPoint(rect.left+38,rect.top+19));
     }
 private:GitFile fFile;const Theme* fTheme;
 };
@@ -58,10 +58,10 @@ public:
         owner->SetHighColor(colors[fGraph.color%6]);owner->StrokeLine(BPoint(x(fGraph.lane),rect.top),BPoint(x(fGraph.lane),mid));
         owner->FillEllipse(BPoint(x(fGraph.lane),mid),3.5,3.5);owner->SetPenSize(1);
         float textX=x(std::max(3,fGraph.width))+5;
-        owner->SetHighColor(t.text);BString subject(fCommit.subject.c_str());
+        owner->SetHighColor(IsSelected()?t.selectionText:t.text);BString subject(fCommit.subject.c_str());
         if(!fCommit.refs.empty()) subject.Prepend(("["+fCommit.refs+"] ").c_str());
         owner->TruncateString(&subject,B_TRUNCATE_END,rect.right-textX-8);owner->DrawString(subject.String(),BPoint(textX,rect.top+17));
-        owner->SetHighColor(t.muted);std::string detail=fCommit.hash.substr(0,8)+"  "+fCommit.author+"  "+fCommit.date.substr(0,10);
+        owner->SetHighColor(IsSelected()?t.selectionText:t.muted);std::string detail=fCommit.hash.substr(0,8)+"  "+fCommit.author+"  "+fCommit.date.substr(0,10);
         BString label(detail.c_str());owner->TruncateString(&label,B_TRUNCATE_END,rect.right-textX-8);owner->DrawString(label.String(),BPoint(textX,rect.top+36));
     }
 private:Commit fCommit;GraphRow fGraph;const Theme* fTheme;
@@ -97,10 +97,11 @@ GitView::GitView():BView("source control",B_WILL_DRAW) {
         .Add(fHistoryTitle).Add(historyScroll).Add(fMore);
     auto* left=new BSplitView(B_VERTICAL,5);left->AddChild(changes);left->AddChild(history);left->SetItemWeight(left->GetLayout()->ItemAt(0),.45f);left->SetItemWeight(left->GetLayout()->ItemAt(1),.55f);
     fDiff=new DiffView();
-    fComparisonFile=new BMenuField("comparison file","File",new BMenu("Select a commit"));fComparisonFile->SetEnabled(false);
+    fComparisonFile=new BMenuField("comparison file","",new BMenu("Select a commit"));fComparisonFile->SetEnabled(false);
     auto* right=new BView("diff panel",0);
     BLayoutBuilder::Group<>(right,B_VERTICAL,0)
-        .AddGroup(B_HORIZONTAL,6).SetInsets(8,5,8,5).Add(working).Add(staged).AddGlue().End().Add(fComparisonFile).Add(fDiff);
+        .AddGroup(B_HORIZONTAL,6).SetInsets(8,5,8,5).Add(working).Add(staged).AddGlue().End()
+        .AddGroup(B_HORIZONTAL,6).Add(new BStringView("comparison file label","File")).Add(fComparisonFile).End().Add(fDiff);
     auto* split=new BSplitView(B_HORIZONTAL,1);split->AddChild(left);split->AddChild(right);split->SetItemWeight(split->GetLayout()->ItemAt(0),.4f);split->SetItemWeight(split->GetLayout()->ItemAt(1),.6f);
     left->SetExplicitMinSize(BSize(300,200));right->SetExplicitMinSize(BSize(150,100));
     BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(split).Add(fStatus);
@@ -116,7 +117,7 @@ void GitView::AttachedToWindow() {
     Refresh();
 }
 void GitView::ApplyTheme(const Theme& t) { fTheme=t;ThemeView(this,t);fDiff->ApplyTheme(t); }
-void GitView::ApplySettings(const EditorSettings& settings) { ApplyTheme(Theme::Builtins()[settings.theme]);fDiff->ApplySettings(settings); }
+void GitView::ApplySettings(const EditorSettings& settings) { ApplyTheme(settings.Colors());fDiff->ApplySettings(settings); }
 void GitView::SetRepository(std::string root,const std::string& error) {
     ++fGeneration;++fDiffRequest;++fHistoryRequest;++fStatusRequest;fRoot=std::move(root);fHistoryPath.clear();fBusy=fHistoryBusy=false;
     if(fJobs) { fJobs->Cancel("status");fJobs->Cancel("history");fJobs->Cancel("diff"); }

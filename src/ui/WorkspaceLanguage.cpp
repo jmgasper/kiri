@@ -28,7 +28,8 @@ std::string OneLine(std::string text) { for(auto& c:text) if(static_cast<unsigne
 void Workspace::ShowLanguageTools() {
     if(fLanguageToolsWindow.IsValid()) { fLanguageToolsWindow.SendMessage(kShowLanguageTools);return; }
     auto error=fLanguageTools.Load(fSettings);if(!error.empty()) Notice(error);
-    auto* window=new LanguageToolsWindow(BMessenger(this),fLanguageTools,fSettings,Frame());fLanguageToolsWindow=BMessenger(window);window->Show();
+    auto* window=new LanguageToolsWindow(BMessenger(this),fLanguageTools,fSettings,Frame());fLanguageToolsWindow=BMessenger(window);
+    BMessage appearance(kWindowTheme);fEditorSettings.WriteTo(appearance);ThemeWindow(window,appearance);window->Show();
 }
 void Workspace::FormatDocument(Editor* source) {
     Document* document=ByEditor(source);
@@ -66,6 +67,7 @@ void Workspace::CancelCompletion() {
     fCompletionDocument=0;fCompletionView=0;fCompletionText.clear();fCompletions.clear();fCompletionLabels.clear();
 }
 void Workspace::CloseLanguage(Document& document) {
+    InvalidateAnalysis(document);
     if(fCompletionDocument==document.id || fTypedDocument==document.id) CancelCompletion();
     auto found=fServers.find(document.serverKey);
     if(found!=fServers.end() && found->second.client && found->second.client->Ready()) {
@@ -73,14 +75,16 @@ void Workspace::CloseLanguage(Document& document) {
         if(document.serverVersion) server.Close(document.serverURI);
     }
     document.serverKey.clear();document.serverURI.clear();document.serverText.clear();document.symbols.clear();document.languageStatus.clear();document.symbolError.clear();
-    document.serverVersion=0;document.symbolVersion=-1;document.symbolRequest=0;document.completionRequest=0;document.languageDirty=true;
+    document.serverVersion=0;document.serverRevision=-1;document.symbolVersion=-1;document.symbolRequest=0;document.completionRequest=0;document.languageDirty=true;
 }
 void Workspace::ResetLanguages() {
     ClearRenameBorrowed();
     CancelCompletion();++fLanguageGeneration;
     for(auto& document:fDocuments) CloseLanguage(*document);
-    for(auto& entry:fServers) if(entry.second.client) entry.second.client->Stop();
-    fServers.clear();fSymbolBar->SetSymbols({},0,0);fSymbolBar->SetStatus("Updating language tools…");
+    for(auto& entry:fServers) {if(entry.second.client) entry.second.client->Stop();if(entry.second.snapshotClient) entry.second.snapshotClient->Stop();}
+    auto retired=std::make_shared<decltype(fServers)>(std::move(fServers));fServers.clear();
+    fJobs->Submit([retired](const auto&) {retired->clear();return AsyncQueue::Callback();});
+    fSymbolBar->SetSymbols({},0,0);fSymbolBar->SetStatus("Updating language tools…");
 }
 LanguageServer* Workspace::EnsureLanguage(Document& document) {
     auto* editor=document.editor;
@@ -107,6 +111,7 @@ LanguageServer* Workspace::EnsureLanguage(Document& document) {
         document.serverKey=key;document.serverURI=FileURI(document.path);document.serverLanguage=profile->language;
         auto inserted=fServers.try_emplace(key);auto& entry=inserted.first->second;
         if(inserted.second) {
+            entry.command=command;entry.root=root;entry.initialization=Json::parse(profile->initializationOptions);entry.configuration=Json::parse(profile->configuration);
             auto executable=command[0];
             if(access(executable.c_str(),X_OK)!=0) entry.status="Install "+fs::path(executable).filename().string()+" · Language Tools…";
             else {
@@ -116,10 +121,12 @@ LanguageServer* Workspace::EnsureLanguage(Document& document) {
                         if(generation!=fLanguageGeneration) return;
                         auto found=fServers.find(key);if(found==fServers.end()) return;
                         found->second.status=error.empty()?"Language server ready":error;
-                        for(auto& d:fDocuments) if(d->serverKey==key) d->languageStatus=found->second.status;
-                        UpdateSymbolBar();
+                        for(auto& d:fDocuments) if(d->serverKey==key) {d->languageStatus=found->second.status;if(!error.empty()) {InvalidateAnalysis(*d);d->diagnosticStatus="Diagnostics unavailable";d->semanticStatus="Lexical highlighting";}}
+                        fProblemsDirty=true;UpdateSymbolBar();UpdateProblems();
                     });
-                },Json::parse(profile->initializationOptions),Json::parse(profile->configuration));
+                },entry.initialization,entry.configuration,[this,key,generation](const std::string& method,const Json& params) {
+                    fJobs->Post([this,key,generation,method,params]{LanguageNotification(key,generation,method,params);});
+                });
             }
         }
         document.languageStatus=entry.status;return entry.client.get();
@@ -129,12 +136,20 @@ bool Workspace::SyncLanguage(Document& document,LanguageServer& server) {
     if(!server.Ready()) return false;
     auto text=document.editor->Text();
     if(!document.serverVersion) {
-        document.serverVersion=1;server.Open(document.serverURI,document.serverLanguage,1,text);
-    } else if(document.serverText!=text) {
+        document.serverVersion=++fLanguageVersion;server.Open(document.serverURI,document.serverLanguage,document.serverVersion,text);
+    } else if(document.serverText!=text || document.serverRevision!=document.editor->InputRevision()) {
+        if(!server.SupportsChanges()) {
+            document.diagnosticStatus="Analysis paused · server does not accept document changes";
+            document.semanticStatus="Lexical highlighting";fProblemsDirty=true;return false;
+        }
         server.Cancel(document.symbolRequest);document.symbolRequest=0;document.symbolVersion=-1;
-        server.Change(document.serverURI,++document.serverVersion,document.serverText,text);
+        document.serverVersion=++fLanguageVersion;server.Change(document.serverURI,document.serverVersion,document.serverText,text);
     } else { document.languageDirty=false;return false; }
-    document.serverText=std::move(text);document.languageDirty=false;RequestSymbols(document,server);return true;
+    if(document.analysisRevision!=document.editor->InputRevision()) InvalidateAnalysis(document);
+    document.diagnosticWaitAt=system_time();document.diagnosticStatus="Waiting for diagnostics";
+    document.serverText=std::move(text);document.languageDirty=false;document.serverRevision=document.editor->InputRevision();RequestSymbols(document,server);RequestSemantic(document,server);
+    auto found=fServers.find(document.serverKey);if(found!=fServers.end() && found->second.unversionedDiagnostics) {found->second.snapshotDirty=true;found->second.snapshotChangedAt=system_time();}
+    fProblemsDirty=true;return true;
 }
 void Workspace::RequestSymbols(Document& document,LanguageServer& server) {
     document.symbolError.clear();
@@ -155,12 +170,16 @@ void Workspace::RequestSymbols(Document& document,LanguageServer& server) {
 void Workspace::LanguageTick() {
     fJobs->Drain();
     for(auto& document:fDocuments) {
+        auto previous=document->languageStatus;
         auto* server=EnsureLanguage(*document);
-        if(server && server->Ready() && (!document->serverVersion || (document->languageDirty && system_time()-document->textChangedAt>250000))) {
+        if(!server) {document->diagnosticStatus="Diagnostics unavailable";document->semanticStatus="Lexical highlighting";}
+        if(previous!=document->languageStatus) fProblemsDirty=true;
+        if(server && server->Ready() && (!document->serverVersion || ((document->languageDirty || document->serverRevision!=document->editor->InputRevision()) && system_time()-document->textChangedAt>250000))) {
             try { SyncLanguage(*document,*server);if(Current()==document.get()) UpdateSymbolBar(); }
             catch(const std::exception& error) { document->languageStatus=error.what();UpdateSymbolBar(); }
         }
     }
+    AnalysisTick();
     if(fTypedDocument && system_time()-fTypedAt>180000) {
         auto id=fTypedDocument;auto character=fTypedCharacter;fTypedDocument=0;
         if(auto* document=ByID(id);document && document==Current()) Complete(document->editor,false,character);
@@ -188,6 +207,7 @@ void Workspace::Complete(Editor* source,bool manual,int character) {
     if(!HasCapability(capabilities,"completionProvider")) { if(manual) Notice("This language server does not provide completion.");return; }
     if(source->SendMessage(SCI_GETSELECTIONSTART)!=source->SendMessage(SCI_GETSELECTIONEND) || source->SendMessage(SCI_GETSELECTIONS)!=1) return;
     CancelCompletion();SyncLanguage(*d,*server);
+    if(d->serverRevision!=source->InputRevision()) {if(manual) Notice(d->diagnosticStatus);return;}
     auto caret=source->SendMessage(SCI_GETCURRENTPOS),start=source->SendMessage(SCI_WORDSTARTPOSITION,caret,true);
     auto text=std::make_shared<std::string>(source->Text());
     Json context={{"triggerKind",1}};

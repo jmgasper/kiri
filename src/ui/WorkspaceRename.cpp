@@ -24,7 +24,8 @@ public:
     }
     bool QuitRequested() override { BMessage message(kRenameDismiss);message.AddInt64("serial",fSerial);fTarget.SendMessage(&message);return true; }
     void MessageReceived(BMessage* message) override {
-        if(message->what==kRenameSubmit) {
+        if(message->what==kWindowTheme) ThemeWindow(this,*message);
+        else if(message->what==kRenameSubmit) {
             auto error=ValidateRenameName(fName->Text());if(!error.empty()) { fStatus->SetText(error.c_str());return; }
             BMessage request(kRenameSubmit);request.AddString("name",fName->Text());request.AddInt64("serial",fSerial);fTarget.SendMessage(&request);fStatus->SetText("Requesting rename preview…");
         } else if(message->what==kEditPreview) { const char* error=nullptr;if(message->FindString("status",&error)==B_OK) { fStatus->SetText(error);fStatus->SetToolTip(error); } }
@@ -46,7 +47,10 @@ void Workspace::RenameSymbol(Editor* source) {
     auto provider=server->Capabilities().value("renameProvider",Json(false));
     if(provider==false || provider.is_null()) { Notice("This language server does not support Rename Symbol.");return; }
     for(auto& document:fDocuments) if(document->editor) {
-        auto* other=EnsureLanguage(*document);if(other==server) SyncLanguage(*document,*server);
+        auto* other=EnsureLanguage(*document);if(other==server) {
+            SyncLanguage(*document,*server);
+            if(document->serverRevision!=document->editor->InputRevision()) {Notice(document->diagnosticStatus);return;}
+        }
     }
     ClearRenameBorrowed();
     auto serial=++fRenameSerial;fRenameDocument=d->id;fRenameCaret=source->SendMessage(SCI_GETCURRENTPOS);fRenameText=source->Text();
@@ -74,7 +78,7 @@ void Workspace::RenameSymbol(Editor* source) {
             fRenameStamps=std::move(stamps);auto* server=found->second.client.get();
             auto show=[this,serial,name](const std::string& placeholder) {
                 if(serial!=fRenameSerial) return;
-                auto* prompt=new RenamePrompt(this,placeholder.empty()?name:placeholder,serial,Theme::Builtins()[fEditorSettings.theme]);fRenameWindow=BMessenger(prompt);
+                auto* prompt=new RenamePrompt(this,placeholder.empty()?name:placeholder,serial,fEditorSettings.Colors());fRenameWindow=BMessenger(prompt);
             };
             if(!provider.is_object() || !provider.value("prepareProvider",false)) { show(name);return; }
             auto encoding=server->Encoding();auto text=fRenameText;

@@ -85,6 +85,11 @@ void Application::MessageReceived(BMessage* message) {
         case kOpenProject:case kOpenFile:case kNewFile:Open(*message);break;
         case kShowLauncher:ShowLauncher();break;
         case kRecentsChanged:if(fLauncher.IsValid()) fLauncher.SendMessage(kRecentsChanged);break;
+        case kThemeLibraryChanged: {
+            BMessenger source;message->FindMessenger("source",&source);
+            for(auto& workspace:fWorkspaces) if(workspace.IsValid() && workspace!=source) workspace.SendMessage(message);
+            if(fLauncher.IsValid()) fLauncher.SendMessage(kRecentsChanged);break;
+        }
         case kWorkspaceOpened:case kWorkspaceActivated: {
             BMessenger window;if(message->FindMessenger("workspace",&window)!=B_OK || !window.IsValid()) break;
             if(std::find(fWorkspaces.begin(),fWorkspaces.end(),window)==fWorkspaces.end()) fWorkspaces.push_back(window);

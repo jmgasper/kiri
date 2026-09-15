@@ -24,23 +24,26 @@ class ExternalWindow:public BWindow {
 public:
     ExternalWindow(Workspace* owner,int64 document,int64 serial,const std::shared_ptr<DiffModel>& model,const EditorSettings& settings,const std::string& backups,bool exists)
         :BWindow(BRect(0,0,1060,660),"External File Changes",B_TITLED_WINDOW_LOOK,B_FLOATING_APP_WINDOW_FEEL,B_AUTO_UPDATE_SIZE_LIMITS),fTarget(owner),fDocument(document),fSerial(serial),fBackups(backups) {
-        auto* diff=new DiffView();diff->ApplySettings(settings);diff->SetModel(model);
+        auto* diff=new DiffView();fDiff=diff;diff->ApplySettings(settings);diff->SetModel(model);
         auto* label=new BStringView("external policy","Both versions are backed up. Keep Editing lets Save replace this disk version.");
         auto* reload=new BButton("reload disk","Reload Disk",new BMessage(kExternalReload));reload->SetEnabled(exists);
         auto* keep=new BButton("keep editing","Keep Editing",new BMessage(kExternalKeep));
         auto* copies=new BButton("open backups","Open Backups…",new BMessage(kExternalBackups));
         auto* close=new BButton("close comparison","Close",new BMessage(B_QUIT_REQUESTED));
-        BLayoutBuilder::Group<>(this,B_VERTICAL,6).SetInsets(8).Add(label).Add(diff)
+        auto* panel=new BView("external comparison panel",B_WILL_DRAW);
+        BLayoutBuilder::Group<>(panel,B_VERTICAL,6).SetInsets(8).Add(label).Add(diff)
             .AddGroup(B_HORIZONTAL,6).Add(copies).AddGlue().Add(close).Add(keep).Add(reload);
+        BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(panel);
         for(auto* button:{reload,keep,copies,close}) button->SetTarget(this);
-        ThemeView(this->ChildAt(0),Theme::Builtins()[settings.theme]);CenterIn(owner->Frame());Show();
+        ThemeView(this->ChildAt(0),settings.Colors());CenterIn(owner->Frame());Show();
     }
     void MessageReceived(BMessage* message) override {
-        if(message->what==kExternalReload || message->what==kExternalKeep || message->what==kExternalBackups) {
+        if(message->what==kWindowTheme) {ThemeWindow(this,*message);EditorSettings settings;settings.ReadFrom(*message);fDiff->ApplySettings(settings);}
+        else if(message->what==kExternalReload || message->what==kExternalKeep || message->what==kExternalBackups) {
             BMessage action(message->what);action.AddInt64("document",fDocument);action.AddInt64("external_serial",fSerial);action.AddString("directory",fBackups.c_str());fTarget.SendMessage(&action);
         }else BWindow::MessageReceived(message);
     }
-private:BMessenger fTarget;int64 fDocument,fSerial;std::string fBackups;
+private:BMessenger fTarget;int64 fDocument,fSerial;std::string fBackups;DiffView* fDiff;
 };
 }
 void Workspace::UpdateExternalBar() {

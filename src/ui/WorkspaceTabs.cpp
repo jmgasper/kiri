@@ -115,7 +115,7 @@ Workspace* Workspace::DetachTab(int64 id,BPoint screenPoint) {
     destination->selected=0;destination->cards->SetVisibleItem(int32(1));
     if(!last) RefreshRepresentative(*document);
     RemoveEmptyPane(source);ActivatePane(fActivePane,true);SaveSettings();
-    window->ApplyTheme(fEditorSettings.theme);window->ActivatePane(destination,true);
+    window->ApplyTheme();window->ActivatePane(destination,true);
     window->UpdateIfNeeded();window->RestoreView(*window->CurrentTab(),state);
     window->StartRecovery();window->SaveSettings();window->Show();
     return window;

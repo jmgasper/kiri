@@ -77,6 +77,10 @@ VTermScreenCell TerminalModel::Cell(int row,int column,int scrollOffset) const {
         int index=static_cast<int>(fScrollback.size())+actual;
         if(index>=0 && column>=0 && column<static_cast<int>(fScrollback[index].size())) cell=fScrollback[index][column];
     } else if(actual<fRows && column>=0 && column<fColumns) vterm_screen_get_cell(fScreen,{actual,column},&cell);
+    // Default colors follow the current theme, including cells in scrollback.
+    // Explicit RGB and indexed terminal colors retain their original meaning.
+    if(VTERM_COLOR_IS_DEFAULT_FG(&cell.fg)) {vterm_color_rgb(&cell.fg,fForeground>>16,(fForeground>>8)&255,fForeground&255);cell.fg.type|=VTERM_COLOR_DEFAULT_FG;}
+    if(VTERM_COLOR_IS_DEFAULT_BG(&cell.bg)) {vterm_color_rgb(&cell.bg,fBackground>>16,(fBackground>>8)&255,fBackground&255);cell.bg.type|=VTERM_COLOR_DEFAULT_BG;}
     return cell;
 }
 std::string TerminalModel::Text(int firstRow,int lastRow,int scrollOffset) const {
@@ -104,10 +108,15 @@ void TerminalModel::Paste(const std::string& text) {
     vterm_keyboard_end_paste(fTerm);
 }
 void TerminalModel::Colors(uint32_t foreground,uint32_t background) {
+    fForeground=foreground;fBackground=background;
     VTermColor fg,bg;
     vterm_color_rgb(&fg,foreground>>16,(foreground>>8)&255,foreground&255);
     vterm_color_rgb(&bg,background>>16,(background>>8)&255,background&255);
-    vterm_screen_set_default_colors(fScreen,&fg,&bg);
+    vterm_state_set_default_colors(vterm_obtain_state(fTerm),&fg,&bg);
+}
+void TerminalModel::Palette(const std::array<uint32_t,16>& colors) {
+    auto* state=vterm_obtain_state(fTerm);
+    for(int i=0;i<16;++i) {VTermColor color;auto c=colors[i];vterm_color_rgb(&color,c>>16,(c>>8)&255,c&255);vterm_state_set_palette_color(state,i,&color);}
 }
 VTermPos TerminalModel::Cursor() const { VTermPos p{};vterm_state_get_cursorpos(vterm_obtain_state(fTerm),&p);return p; }
 PtySession::~PtySession() { Stop(); }

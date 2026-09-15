@@ -9,6 +9,7 @@
 #include "ui/EditorSettings.h"
 #include "core/LanguageTools.h"
 #include "core/LanguageServer.h"
+#include "core/LanguageAnalysis.h"
 #include "core/EditTransaction.h"
 #include <Window.h>
 #include <memory>
@@ -20,7 +21,7 @@ class BFilePanel;class BCardLayout;class BSplitView;class BStringView;
 class BTextControl;class BCheckBox;class BMessageRunner;
 class BMenuBar;class BMenuField;class BButton;
 namespace kiri {
-class Editor;struct EditorState;class Explorer;class GitView;class TerminalPanel;class TabStrip;class RefreshButton;class SymbolBar;
+class Editor;struct EditorState;class Explorer;class GitView;class TerminalPanel;class TabStrip;class RefreshButton;class SymbolBar;class ProblemsView;
 class Workspace:public BWindow {
 public:
     explicit Workspace(const std::string& settingsDirectory={},bool restoreSession=true,const std::string& sessionDirectory={});
@@ -57,6 +58,11 @@ private:
         int64 symbolRequest=0,completionRequest=0,textChangedAt=0,formatSerial=0,formatView=0;
         bool languageDirty=true;
         std::vector<DocumentSymbol> symbols;
+        int64 serverRevision=-1,analysisRevision=-1,diagnosticSerial=0,semanticSerial=0,semanticRequest=0,diagnosticWaitAt=0;
+        int semanticVersion=-1;
+        std::vector<Diagnostic> diagnostics;
+        std::vector<SemanticToken> semanticTokens;
+        std::string diagnosticStatus,semanticStatus;
     };
     Document* Current();
     Document* ByID(int64 id);
@@ -115,7 +121,7 @@ private:
     void SaveTo(int64 id,const std::string& path);
     void ContinueSaveAll();
     void CancelQuit();
-    void ApplyTheme(int index);
+    void ApplyTheme(int index=-1);
     void ShowPreferences();
     void ShowFind();
     SearchOptions FindOptions() const;
@@ -171,6 +177,16 @@ private:
     bool SyncLanguage(Document& document,LanguageServer& server);
     void RequestSymbols(Document& document,LanguageServer& server);
     void UpdateSymbolBar();
+    void RequestSemantic(Document& document,LanguageServer& server);
+    void LanguageNotification(const std::string& key,int64 generation,const std::string& method,const Json& params);
+    void AcceptDiagnostics(const std::string& key,int64 generation,const Json& params,int64 snapshot=0);
+    void StartDiagnosticSnapshot(const std::string& key);
+    bool DiagnosticSnapshotCurrent(const std::string& key,int64 serial);
+    void InvalidateAnalysis(Document& document);
+    void AnalysisTick();
+    void UpdateProblems();
+    void JumpProblem(int64 document,int64 serial,size_t offset);
+    void NavigateProblem(int direction);
     void Complete(Editor* source,bool manual=true,int character=0);
     void AcceptCompletion(Editor* source,const std::string& label);
     void ApplyCompletion(int64 document,int64 serial,CompletionItem item);
@@ -191,7 +207,16 @@ private:
     std::unique_ptr<BMessageRunner> fDetachTimer;
     int64 fDetachTab=0;
     BPoint fDetachPoint;
-    struct ServerEntry { std::unique_ptr<LanguageServer> client;std::string status; };
+    struct DiagnosticSnapshot { int64 document=0,revision=0;int version=0;std::string uri,language,text; };
+    struct ServerEntry {
+        std::unique_ptr<LanguageServer> client;std::string status,root;
+        std::vector<std::string> command;
+        Json initialization,configuration;
+        bool unversionedDiagnostics=false,snapshotDirty=false;
+        int64 snapshotSerial=0,snapshotChangedAt=0;
+        std::shared_ptr<LanguageServer> snapshotClient;
+        std::vector<DiagnosticSnapshot> snapshots;
+    };
     std::map<std::string,ServerEntry> fServers;
     LanguageTools fLanguageTools;
     BMessenger fLanguageToolsWindow;
@@ -203,6 +228,9 @@ private:
     int64 fTypedDocument=0,fTypedAt=0;
     int fTypedCharacter=0;
     SymbolBar* fSymbolBar;
+    ProblemsView* fProblems=nullptr;
+    int fLanguageVersion=0;
+    bool fProblemsDirty=true;
     struct Snapshot { int64 id,revision;size_t total,offset=0;std::shared_ptr<Draft> draft; };
     std::unique_ptr<Snapshot> fSnapshot;
     std::vector<std::unique_ptr<Document>> fDocuments;

@@ -22,7 +22,7 @@ void FileItem::DrawItem(BView* owner,BRect rect,bool) {
     }
     else if(entry.directory) { owner->FillRoundRect(BRect(x,y+3,x+13,y+12),2,2);owner->FillRect(BRect(x+1,y,x+6,y+4)); }
     else if(!placeholder) { owner->StrokeRect(BRect(x+2,y,x+11,y+13));owner->StrokeLine(BPoint(x+4,y+5),BPoint(x+9,y+5)); }
-    owner->SetHighColor(placeholder?t.muted:t.text);
+    owner->SetHighColor(IsSelected()?t.selectionText:placeholder?t.muted:t.text);
     BString label(entry.name.c_str());owner->TruncateString(&label,B_TRUNCATE_MIDDLE,rect.Width()-29);
     owner->DrawString(label.String(),BPoint(x+22,rect.top+18));
 }

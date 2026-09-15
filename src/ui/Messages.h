@@ -1,6 +1,8 @@
 #pragma once
 #include <SupportDefs.h>
 namespace kiri {
+constexpr uint32 kWindowTheme='wthm',kThemeLibraryChanged='thlb';
+constexpr uint32 kToggleProblems='prob',kNextProblem='pbnx',kPreviousProblem='pbpr',kJumpProblem='pbgo',kRestartLanguages='lgrs';
 constexpr uint32 kExternalTick='exck',kExternalCompare='excp',kExternalReload='exrl',kExternalKeep='exkp',kExternalBackups='exbk',kProjectUpdated='prup';
 constexpr uint32 kFindChanged='fsch',kFindScope='fscp',kFindHistory='fhst',kFindRefresh='frsh';
 constexpr uint32 kProjectReplace='prrp',kEditPreview='edpv',kEditApply='edap',kEditToggle='edtg',kEditSelect='edsl',kEditCancel='edca',kEditUndo='edun',kEditRefresh='edrf';

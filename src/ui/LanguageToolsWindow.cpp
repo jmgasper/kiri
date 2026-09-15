@@ -1,4 +1,5 @@
 #include "ui/LanguageToolsWindow.h"
+#include "ui/Theme.h"
 #include "ui/Messages.h"
 #include <Alert.h>
 #include <Button.h>
@@ -20,16 +21,18 @@ LanguageToolsWindow::LanguageToolsWindow(BMessenger target,LanguageTools tools,s
     fAutomatic=new BCheckBox("automatic completion","Suggest completions while typing",nullptr);fAutomatic->SetValue(fTools.completion?B_CONTROL_ON:B_CONTROL_OFF);
     fLanguages=new BPopUpMenu("Language");
     for(size_t i=0;i<fTools.profiles.size();++i) { auto* request=new BMessage(kSelectLanguage);request->AddInt32("language",i);fLanguages->AddItem(new BMenuItem(fTools.profiles[i].name.c_str(),request)); }
-    auto* language=new BMenuField("language server","Language",fLanguages);fHint=new BStringView("language extensions","");
+    auto* language=new BMenuField("language server","",fLanguages);fHint=new BStringView("language extensions","");
     auto* apply=new BButton("apply language tools","Apply",new BMessage(kApply));auto* done=new BButton("language tools done","Done",new BMessage(kApply));done->Message()->AddBool("close",true);
-    BLayoutBuilder::Group<>(this,B_VERTICAL,12).SetInsets(20)
+    auto* panel=new BView("language tools panel",B_WILL_DRAW);
+    BLayoutBuilder::Group<>(panel,B_VERTICAL,12).SetInsets(20)
         .Add(new BStringView("format label","Formatting")).Add(fPrettier)
         .Add(new BStringView("format help","Project-local Prettier and project formatting settings are used automatically."))
         .AddStrut(10).Add(new BStringView("servers label","Language servers"))
-        .Add(language).Add(fCommand).Add(fHint).Add(fAutomatic)
+        .AddGroup(B_HORIZONTAL,8).Add(new BStringView("language label","Language")).Add(language).End().Add(fCommand).Add(fHint).Add(fAutomatic)
         .Add(new BStringView("server help","Use a command with arguments; quote paths with spaces. Leave empty to disable."))
         .AddGroup(B_HORIZONTAL,8).Add(new BButton("language defaults","Restore Defaults",new BMessage(kDefaults)))
             .AddGlue().Add(new BButton("language cancel","Cancel",new BMessage(B_QUIT_REQUESTED))).Add(apply).Add(done).End();
+    BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(panel);
     SetDefaultButton(done);Select(0);MoveTo(parent.left+(parent.Width()-Bounds().Width())/2,parent.top+(parent.Height()-Bounds().Height())/2);
 }
 void LanguageToolsWindow::Select(int index) {
@@ -45,6 +48,7 @@ bool LanguageToolsWindow::Store() {
 }
 void LanguageToolsWindow::MessageReceived(BMessage* message) {
     switch(message->what) {
+        case kWindowTheme:ThemeWindow(this,*message);break;
         case kShowLanguageTools:Activate();break;
         case kSelectLanguage: {
             if(fSelected>=0 && fSelected<static_cast<int>(fTools.profiles.size())) fTools.profiles[fSelected].command=fCommand->Text();

@@ -126,6 +126,8 @@ for project-local versions, other languages, configuration and limits.
   **Apply** or **OK** updates open files, new documents and Git diffs; **Cancel**
   discards unapplied choices, and **Restore Defaults** previews the original
   font, size and theme. Preferences persist between sessions.
+  **Duplicate Theme** creates an editable palette; named colors, import/export and
+  stable theme IDs are described in [custom themes](docs/CUSTOM_THEMES.md).
 - Five dark themes are available: **Obsidian, Nord, Midnight, Forest and Ember**.
   Five light themes are available: **Daylight, Linen, Glacier, Rose and Meadow**.
   **View → Color Theme** also changes the theme directly. Window position,
@@ -134,6 +136,11 @@ for project-local versions, other languages, configuration and limits.
 - Lexilla supplies highlighting for C/C++, Python, JavaScript/TypeScript, HTML,
   JSON, XML, CSS, Java, C#, Rust, shell, SQL, Markdown, YAML, TOML, and more.
   A few related languages use an approximate C-family lexer.
+- Language servers add semantic colors and diagnostic underlines to open source
+  files. **View → Problems** (Alt+Shift+M) groups reports by file and severity;
+  double-click to jump, hover over an underline, or use Next/Previous Problem.
+  Preferences can disable semantic highlighting. See [language analysis](docs/LANGUAGE_ANALYSIS.md)
+  for server support, revision safety and the 8 MiB limit.
 - Images use installed Haiku translators, a transparency checkerboard and
   fit/actual-size modes. Double-click to switch size; drag to pan at actual size.
   Other binary formats open as read-only, bounded hex previews.

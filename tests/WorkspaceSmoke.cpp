@@ -2,6 +2,8 @@
 // run alongside a user's open Kiri session without touching its documents.
 #include "ui/Workspace.h"
 #include "ui/Editor.h"
+#include "ui/ProblemsView.h"
+#include <SplitView.h>
 #include "ui/TabStrip.h"
 #include "ui/Application.h"
 #include <Application.h>
@@ -18,6 +20,15 @@ struct WorkspaceTestAccess {
         reply.AddInt32("panes",workspace.fPanes.size());reply.AddInt32("documents",workspace.fDocuments.size());
         reply.AddInt32("closed_tabs",workspace.fClosedTabs.size());reply.AddBool("preview_tabs",workspace.fPreviewTabs);
         reply.AddRect("frame",workspace.Frame());
+        reply.AddString("theme_id",workspace.fEditorSettings.themeID.c_str());reply.AddBool("semantic_enabled",workspace.fEditorSettings.semanticHighlighting);
+        reply.AddBool("problems_collapsed",workspace.fTerminalSplit->IsItemCollapsed(2));reply.AddBool("problems_hidden",workspace.fProblems->IsHidden());
+        if(auto* d=workspace.Current()) {
+            reply.AddString("language_status",d->languageStatus.c_str());reply.AddString("diagnostic_status",d->diagnosticStatus.c_str());reply.AddString("semantic_status",d->semanticStatus.c_str());
+            reply.AddInt32("diagnostics",d->diagnostics.size());reply.AddInt32("semantic_tokens",d->semanticTokens.size());reply.AddInt32("server_version",d->serverVersion);
+            for(const auto& problem:d->diagnostics) {BMessage row;row.AddInt64("start",problem.start);row.AddInt64("end",problem.end);row.AddString("message",problem.message.c_str());reply.AddMessage("problem",&row);}
+            std::map<std::string,int> roles;for(const auto& token:d->semanticTokens) ++roles[SemanticColorRole(token.role)];for(auto& role:roles) reply.AddInt32(role.first.c_str(),role.second);
+        }
+
         for(auto& pane:workspace.fPanes) {
             BMessage geometry;geometry.AddInt64("id",pane->id);geometry.AddRect("strip",pane->strip->ConvertToScreen(pane->strip->Bounds()));
             geometry.AddRect("panel",pane->panel->ConvertToScreen(pane->panel->Bounds()));reply.AddMessage("pane",&geometry);

@@ -72,8 +72,9 @@ Apply** after reopening the dialog. The `configuration` object answers LSP
 Kiri implements LSP initialization and shutdown, document open/change/save/close,
 UTF-8 and UTF-16 position negotiation, full and incremental synchronization,
 completion and completion resolution, and both hierarchical and flat document
-symbols. It advertises the features it implements; diagnostics, refactoring,
-rename and general workspace edits are separate features.
+symbols. It also supports [push diagnostics and full semantic tokens](LANGUAGE_ANALYSIS.md),
+and [previewed symbol rename](SEARCH_AND_REFACTORING.md). General server-initiated
+workspace edits, pull diagnostics and code actions are not enabled.
 
 Language tools run asynchronously. Both formatting and language services are
 limited to source files up to 8 MiB, leaving Kiri's larger-file editing path

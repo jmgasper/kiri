@@ -4,6 +4,7 @@
 #include <deque>
 #include <string>
 #include <vector>
+#include <array>
 #include <sys/types.h>
 
 namespace kiri {
@@ -24,6 +25,7 @@ public:
     void Character(uint32_t codepoint,VTermModifier modifiers=VTERM_MOD_NONE);
     void Paste(const std::string& text);
     void Colors(uint32_t foreground,uint32_t background);
+    void Palette(const std::array<uint32_t,16>& colors);
     VTermPos Cursor() const;
     VTerm* Handle() const { return fTerm; }
     VTermScreen* Screen() const { return fScreen; }
@@ -43,6 +45,7 @@ private:
     size_t fScrollbackLimit;
     std::deque<std::vector<VTermScreenCell>> fScrollback;
     std::string fOutput;
+    uint32_t fForeground=0xf0f0f0,fBackground=0;
     bool fCursorVisible=true,fAlternate=false;
 };
 class PtySession {

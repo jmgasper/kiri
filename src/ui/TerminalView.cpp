@@ -57,9 +57,9 @@ void TerminalView::FrameResized(float width,float height) {
     if(columns!=fModel.Columns() || rows!=fModel.Rows()) { fModel.Resize(rows,columns);fSession.Resize(rows,columns);Invalidate(); }
 }
 void TerminalView::ApplyTheme(const Theme& t) {
-    fTheme=t;SetViewColor(t.background);SetLowColor(t.background);
+    fTheme=t;SetViewColor(t.terminalBackground);SetLowColor(t.terminalBackground);
     auto packed=[](rgb_color c){return (c.red<<16)|(c.green<<8)|c.blue;};
-    fModel.Colors(packed(t.text),packed(t.background));Invalidate();
+    fModel.Colors(packed(t.terminalText),packed(t.terminalBackground));std::array<uint32_t,16> palette;for(int i=0;i<16;++i) palette[i]=packed(t.terminalANSI[i]);fModel.Palette(palette);Invalidate();
 }
 void TerminalView::FlushInput() {
     auto bytes=fModel.TakeOutput();
@@ -72,7 +72,7 @@ void TerminalView::Tick() {
     if(fExited && !fExitReported) { fExitReported=true;Window()->PostMessage(kTerminalState);Invalidate(); }
 }
 void TerminalView::Draw(BRect update) {
-    SetHighColor(fTheme.background);FillRect(update);
+    SetHighColor(fTheme.terminalBackground);FillRect(update);
     int first=std::max(0,static_cast<int>((update.top-6)/fCellHeight));
     int last=std::min(fModel.Rows()-1,static_cast<int>((update.bottom-6)/fCellHeight));
     for(int row=first;row<=last;++row) {
@@ -82,7 +82,7 @@ void TerminalView::Draw(BRect update) {
             vterm_screen_convert_color_to_rgb(fModel.Screen(),&fg);vterm_screen_convert_color_to_rgb(fModel.Screen(),&bg);
             rgb_color foreground{fg.rgb.red,fg.rgb.green,fg.rgb.blue,255},background{bg.rgb.red,bg.rgb.green,bg.rgb.blue,255};
             if(cell.attrs.reverse) std::swap(foreground,background);
-            if(fSelectionStart>=0 && row>=std::min(fSelectionStart,fSelectionEnd) && row<=std::max(fSelectionStart,fSelectionEnd)) background=fTheme.selection;
+            if(fSelectionStart>=0 && row>=std::min(fSelectionStart,fSelectionEnd) && row<=std::max(fSelectionStart,fSelectionEnd)) {background=fTheme.selection;foreground=fTheme.selectionText;}
             BRect rect(8+col*fCellWidth,6+row*fCellHeight,8+(col+std::max(1,int(cell.width)))*fCellWidth-1,6+(row+1)*fCellHeight-1);
             if(cell.chars[0]==UINT32_MAX) continue;
             SetHighColor(background);FillRect(rect);SetLowColor(background);SetHighColor(foreground);

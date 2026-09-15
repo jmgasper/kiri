@@ -84,7 +84,7 @@ void DiffView::SetModel(std::shared_ptr<const DiffModel> model) {
     Decorate();SetSideBySide(fSideBySide->Value());QueueAlignment();
 }
 void DiffView::ApplyTheme(const Theme& theme) { fTheme=theme;ThemeView(this,theme);for(auto* editor:std::vector<Editor*>{fLeft,fRight,fUnified}) editor->ApplyTheme(theme);Decorate();QueueAlignment(); }
-void DiffView::ApplySettings(const EditorSettings& settings) { for(auto* editor:std::vector<Editor*>{fLeft,fRight,fUnified}) editor->ApplySettings(settings);ApplyTheme(Theme::Builtins()[settings.theme]); }
+void DiffView::ApplySettings(const EditorSettings& settings) { for(auto* editor:std::vector<Editor*>{fLeft,fRight,fUnified}) editor->ApplySettings(settings);ApplyTheme(settings.Colors()); }
 void DiffView::SetSideBySide(bool split) { fSideBySide->SetValue(split);fCards->SetVisibleItem(int32(split && fModel && fModel->error.empty() && !fModel->binary));QueueAlignment(); }
 void DiffView::SetWrap(bool wrap) { fWrap->SetValue(wrap);for(auto* editor:std::vector<Editor*>{fLeft,fRight,fUnified}) editor->SendMessage(SCI_SETWRAPMODE,wrap?SC_WRAP_WORD:SC_WRAP_NONE);QueueAlignment(); }
 void DiffView::Decorate() {
