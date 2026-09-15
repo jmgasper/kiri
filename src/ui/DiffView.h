@@ -11,7 +11,6 @@ class DiffView:public BView {
 public:
     DiffView();
     void AttachedToWindow() override;
-    void AllAttached() override;
     void FrameResized(float width,float height) override;
     void MessageReceived(BMessage* message) override;
     void SetModel(std::shared_ptr<const DiffModel> model);
@@ -27,7 +26,6 @@ public:
     std::shared_ptr<const DiffModel> Model() const { return fModel; }
 private:
     void Decorate();
-    void StyleNavigation();
     void QueueAlignment();
     DiffEditor *fLeft,*fRight;
     Editor* fUnified;

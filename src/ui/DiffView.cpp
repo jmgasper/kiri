@@ -3,6 +3,7 @@
 #include <Button.h>
 #include <CardLayout.h>
 #include <CheckBox.h>
+#include <ControlLook.h>
 #include <LayoutBuilder.h>
 #include <SplitView.h>
 #include <StringView.h>
@@ -11,6 +12,19 @@
 
 namespace kiri {
 namespace { constexpr uint32 kMode='dfmd',kWrap='dfwr',kPrevious='dfpr',kNext='dfnx',kAlign='dfal';constexpr int kMarker=20,kIndicator=20,kPaddingStyle=254; }
+class DiffNavigationButton:public BButton {
+public:
+    using BButton::BButton;
+    void Draw(BRect update) override {
+        BRect rect=Bounds();auto base=ui_color(B_CONTROL_BACKGROUND_COLOR);
+        rgb_color text=int(base.red)+base.green+base.blue>384?rgb_color{0,0,0,255}:rgb_color{255,255,255,255};
+        auto flags=be_control_look->Flags(this);
+        be_control_look->DrawButtonFrame(this,rect,update,base,Parent()?Parent()->ViewColor():ViewColor(),flags);
+        be_control_look->DrawButtonBackground(this,rect,update,base,flags);
+        // Beta 5's default button label can inherit the dark source palette.
+        be_control_look->DrawLabel(this,Label(),nullptr,rect,update,base,flags,BAlignment(B_ALIGN_CENTER,B_ALIGN_MIDDLE),&text);
+    }
+};
 class DiffEditor:public Editor {
 public:
     explicit DiffEditor(DiffView* owner):fOwner(owner) {}
@@ -35,7 +49,7 @@ DiffView::DiffView():BView("comparison",B_FRAME_EVENTS) {
     auto* content=new BView("diff modes",0);fCards=new BCardLayout();content->SetLayout(fCards);fCards->AddView(fUnified);fCards->AddView(split);
     fSideBySide=new BCheckBox("side by side","Side by side",new BMessage(kMode));fSideBySide->SetValue(1);
     fWrap=new BCheckBox("wrap diff","Wrap lines",new BMessage(kWrap));
-    fPrevious=new BButton("previous difference","Previous",new BMessage(kPrevious));fNext=new BButton("next difference","Next",new BMessage(kNext));
+    fPrevious=new DiffNavigationButton("previous difference","Previous",new BMessage(kPrevious));fNext=new DiffNavigationButton("next difference","Next",new BMessage(kNext));
     fStatus=new BStringView("comparison status","");fStatus->SetTruncation(B_TRUNCATE_END);fStatus->SetExplicitMinSize(BSize(100,24));
     BLayoutBuilder::Group<>(this,B_VERTICAL,3)
         .AddGroup(B_HORIZONTAL,6).SetInsets(6,4,6,4).Add(fSideBySide).Add(fWrap).AddGlue().Add(fPrevious).Add(fNext).End()
@@ -43,12 +57,6 @@ DiffView::DiffView():BView("comparison",B_FRAME_EVENTS) {
     Clear("Select a file to compare.");
 }
 void DiffView::AttachedToWindow() { BView::AttachedToWindow();for(auto* control:std::vector<BControl*>{fSideBySide,fWrap,fPrevious,fNext}) control->SetTarget(this);QueueAlignment(); }
-void DiffView::AllAttached() { BView::AllAttached();StyleNavigation(); }
-void DiffView::StyleNavigation() {
-    // Native buttons draw a desktop-colored face after attachment. Keep their
-    // text on that same palette when the surrounding source views are dark.
-    for(auto* button:{fPrevious,fNext}) { button->SetViewUIColor(B_PANEL_BACKGROUND_COLOR);button->SetLowUIColor(B_PANEL_BACKGROUND_COLOR);button->SetHighUIColor(B_CONTROL_TEXT_COLOR); }
-}
 void DiffView::FrameResized(float w,float h) { BView::FrameResized(w,h);QueueAlignment(); }
 void DiffView::QueueAlignment() { if(Window() && !fAlignQueued) { fAlignQueued=true;Window()->PostMessage(kAlign,this); } }
 Editor* DiffView::Left() const { return fLeft; }Editor* DiffView::Right() const { return fRight; }
@@ -75,7 +83,7 @@ void DiffView::SetModel(std::shared_ptr<const DiffModel> model) {
     fStatus->SetText(status.c_str());fStatus->SetToolTip(status.c_str());fPrevious->SetEnabled(!fModel->hunks.empty());fNext->SetEnabled(!fModel->hunks.empty());
     Decorate();SetSideBySide(fSideBySide->Value());QueueAlignment();
 }
-void DiffView::ApplyTheme(const Theme& theme) { fTheme=theme;ThemeView(this,theme);StyleNavigation();for(auto* editor:std::vector<Editor*>{fLeft,fRight,fUnified}) editor->ApplyTheme(theme);Decorate();QueueAlignment(); }
+void DiffView::ApplyTheme(const Theme& theme) { fTheme=theme;ThemeView(this,theme);for(auto* editor:std::vector<Editor*>{fLeft,fRight,fUnified}) editor->ApplyTheme(theme);Decorate();QueueAlignment(); }
 void DiffView::ApplySettings(const EditorSettings& settings) { for(auto* editor:std::vector<Editor*>{fLeft,fRight,fUnified}) editor->ApplySettings(settings);ApplyTheme(Theme::Builtins()[settings.theme]); }
 void DiffView::SetSideBySide(bool split) { fSideBySide->SetValue(split);fCards->SetVisibleItem(int32(split && fModel && fModel->error.empty() && !fModel->binary));QueueAlignment(); }
 void DiffView::SetWrap(bool wrap) { fWrap->SetValue(wrap);for(auto* editor:std::vector<Editor*>{fLeft,fRight,fUnified}) editor->SendMessage(SCI_SETWRAPMODE,wrap?SC_WRAP_WORD:SC_WRAP_NONE);QueueAlignment(); }
