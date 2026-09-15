@@ -31,7 +31,7 @@ the Linux host builds the portable core and tests only.
 To build from source on Haiku:
 
 ```sh
-pkgman install gcc make scintilla_devel lexilla_devel git
+pkgman install gcc make scintilla_devel lexilla_devel libpcre2_devel git
 make -j4
 make check check-native check-language
 ./build-haiku/Kiri /path/to/project
@@ -114,8 +114,12 @@ for project-local versions, other languages, configuration and limits.
   makes it permanent. **File → Reopen Closed Tab** restores recently closed saved
   files and their positions. See [editor panes and tab workflows](docs/EDITOR_PANES.md)
   for shortcuts, session restoration and close/reopen policies.
-- **Search → Open Quickly…** searches file paths. **Search Project** finds literal text
-  and opens a result at its line and column. Newer queries cancel older work.
+- **Search → Open Quickly…** searches file paths. **Search Project** searches disk text
+  with folder/glob filters, regex, case and whole-word options, grouped results and
+  Unicode-aware positions. **Preview Replace…** reviews changes across unsaved
+  buffers and disk files before applying them. **Edit → Rename Symbol…** previews
+  semantic language-server edits, and **Undo Last Project Edit…** restores a
+  multi-file operation. See [search and refactoring](docs/SEARCH_AND_REFACTORING.md).
 - **Edit → Preferences…** (Alt+,) opens editor preferences. Choose an installed
   font, a size from 8 to 48 points, and a theme with a live code preview.
   **Apply** or **OK** updates open files, new documents and Git diffs; **Cancel**
@@ -146,7 +150,8 @@ Alt+P opens files quickly, Alt+F opens find/replace, Alt+Shift+F searches the pr
 Alt+G goes to a line, Alt+S saves, Alt+Shift+T opens a terminal, and Alt+W closes
 the focused terminal or document tab. In the find bar,
 Enter in the replacement field replaces one match; **All** replaces every match
-as one undo action. Terminal control sequences use **Ctrl**, including Ctrl+C
+as one undo action. Regex captures, whole-word matching, selection scope,
+highlights and a recent-query menu are available in the bar. Terminal control sequences use **Ctrl**, including Ctrl+C
 and Ctrl+D.
 
 ## Git
@@ -204,15 +209,17 @@ repositories, file conflicts and preservation, recovery corruption, cancellation
 line mapping, project search, terminal emulation and a real PTY shell:
 
 ```sh
+# Install the PCRE2 development package on the host (for example libpcre2-dev).
 cmake -S . -B build-host -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-host -j8
 ctest --test-dir build-host --output-on-failure
 ```
 
-The current suites pass **163 core checks**, **233 Haiku editor/file/worker checks**
-and **264 native workspace checks** (`make check-workspace`).
-Language checks include real Prettier and TypeScript servers: **98 checks** on
-Linux and **108 on Haiku**, where clangd C++ completion and symbols are also exercised:
+The current suites pass **163 core checks**, **94 Haiku search/edit checks**
+(**91 on Linux**), **266 Haiku editor/file/worker checks** and **323 native
+workspace checks** (`make check-workspace`). Language checks include real
+Prettier and TypeScript servers: **111 checks** on Linux and **121 on Haiku**,
+where clangd C++ completion and symbols are also exercised:
 
 ```sh
 make check-language
@@ -229,7 +236,9 @@ review before implementation.
 
 ## Dependencies and attribution
 
-Kiri is MIT-licensed. Scintilla and Lexilla are system libraries under the
+Kiri is MIT-licensed. PCRE2 supplies UTF-8 regex matching as a system library under its
+[BSD-style license](https://www.pcre.org/licence.txt).
+Scintilla and Lexilla are system libraries under the
 [Scintilla license](https://www.scintilla.org/License.txt).
 Unmodified libvterm 0.3.3 is vendored under its MIT license; see
 [the pinned source](vendor/libvterm/UPSTREAM.md) and [license](vendor/libvterm/LICENSE).

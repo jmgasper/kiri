@@ -1,5 +1,48 @@
 # Verification record
 
+## Advanced search, project replacement and symbol rename — develop
+
+Verified September 15, 2026 on Linux and in the existing Haiku R1/beta5 QEMU VM.
+All three CMake/CTest suites passed. Haiku passed 163 core checks, 94 search/edit
+checks (91 on Linux), 266 native editor/worker checks and 323 workspace checks.
+Real-tool runs passed 111 language checks on Linux and 121 on Haiku, including
+Prettier, TypeScript prepareRename/rename, and clangd completion/symbols.
+
+The search suite covers Unicode captures and whole words, invalid patterns and
+replacement syntax, CR/LF/CRLF anchors, zero-width progress, regex work limits,
+folder/glob and ignored-file scope, multiple results on a line, Unicode columns,
+binary/encoding/size/unreadable/symlink exclusions and result caps. Native editor
+checks verify highlighted ranges, wrapping, selection-only replacement,
+read-only buffers and exact one-step Undo.
+
+Workspace checks run the production preview/apply/restore flow against saved
+and dirty files, including per-match exclusion, edits after preview, changed
+disk files, early cancellation, a failed later write and restoration of already
+completed writes. Tests also cover buffers in another window, cross-window
+rename and whole-operation Undo from either window, query history persistence,
+rapid query changes, project switches and stale result messages. Delayed
+Scintilla notifications are explicitly exercised: they must not invalidate an
+otherwise unchanged preview. Protocol tests reject stale LSP versions, malformed
+UTF positions, overlapping edits and unsupported resource operations as a whole.
+
+The real TypeScript integration renames an exported function, its import and
+its call in another file; an identical string literal and a shadowed parameter
+stay unchanged. The source buffer includes unsaved text, the closed file uses a
+checked safe save, and restore recovers its original bytes. Haiku transaction
+tests verify UTF-8 BOM, CRLF, mode bits and native attributes. A persisted
+write-ahead journal test simulates interruption between a disk write and its
+completion record, then restores the file from that journal.
+
+VNC checks used `/boot/home/KiriSearchDemo`: project results were grouped by
+file, a whole generated file was excluded from a replacement, source disk
+writes were applied and restored, and a real TypeScript rename preview showed
+only the declaration, import and call. Its Apply preserved the module path and
+string literal; Undo Last Project Edit restored the disk text. The native
+package was rebuilt with its PCRE2 runtime dependency.
+
+Usage and limits are documented in [search and refactoring](SEARCH_AND_REFACTORING.md).
+Feature specs 04, 05, 06 and 29 are archived in [the done folder](future_features/done/).
+
 ## Editor tab dragging — develop
 
 Verified September 14, 2026 on Haiku R1/beta5 in the isolated QEMU VM.

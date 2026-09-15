@@ -6,11 +6,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 add_library(kiri_core
     src/core/Process.cpp src/core/Git.cpp src/core/FileIO.cpp
-    src/core/Project.cpp src/core/Terminal.cpp src/core/Recovery.cpp
+    src/core/Search.cpp src/core/EditTransaction.cpp src/core/Project.cpp src/core/Terminal.cpp src/core/Recovery.cpp
     src/core/LanguageTools.cpp src/core/LanguageProtocol.cpp src/core/LanguageServer.cpp)
 target_include_directories(kiri_core PUBLIC src vendor)
 target_compile_options(kiri_core PRIVATE -Wall -Wextra -Wpedantic)
-target_link_libraries(kiri_core PUBLIC Threads::Threads)
+find_path(PCRE2_INCLUDE_DIR pcre2.h REQUIRED)
+find_library(PCRE2_LIBRARY pcre2-8 REQUIRED)
+target_include_directories(kiri_core PRIVATE ${PCRE2_INCLUDE_DIR})
+target_link_libraries(kiri_core PUBLIC Threads::Threads ${PCRE2_LIBRARY})
 
 file(GLOB VTERM_SOURCES CONFIGURE_DEPENDS vendor/libvterm/src/*.c)
 add_library(kiri_vterm STATIC ${VTERM_SOURCES})
@@ -20,6 +23,9 @@ target_link_libraries(kiri_core PUBLIC kiri_vterm)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(kiri_search_tests tests/SearchTests.cpp)
+    target_link_libraries(kiri_search_tests PRIVATE kiri_core)
+    add_test(NAME kiri_search COMMAND kiri_search_tests)
     add_executable(kiri_tests tests/CoreTests.cpp)
     target_link_libraries(kiri_tests PRIVATE kiri_core)
     add_test(NAME kiri_core COMMAND kiri_tests)
@@ -39,7 +45,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
         src/ui/TerminalPanel.cpp src/ui/RefreshButton.cpp
         src/ui/EditorSettings.cpp src/ui/PreferencesWindow.cpp src/ui/FileIcons.cpp
         src/ui/Application.cpp src/ui/LauncherWindow.cpp src/ui/RecentItems.cpp
-        src/ui/WorkspaceLanguage.cpp src/ui/WorkspacePanes.cpp src/ui/WorkspaceTabs.cpp src/ui/SymbolBar.cpp src/ui/LanguageToolsWindow.cpp)
+        src/ui/WorkspaceSearch.cpp src/ui/WorkspaceRename.cpp src/ui/EditPreviewWindow.cpp src/ui/WorkspaceLanguage.cpp src/ui/WorkspacePanes.cpp src/ui/WorkspaceTabs.cpp src/ui/SymbolBar.cpp src/ui/LanguageToolsWindow.cpp)
     add_executable(Kiri src/main.cpp ${KIRI_UI_SOURCES})
     target_include_directories(Kiri PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
     target_compile_options(Kiri PRIVATE -Wall -Wextra -Wno-multichar)

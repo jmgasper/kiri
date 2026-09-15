@@ -29,4 +29,4 @@ rules operate on earlier output. Store portable, versioned definitions.
 
 ## Dependencies and review decisions
 
-Depends on [advanced find/replace](04-advanced-find-replace.md). Keep the first goal within one document; [project replacement](06-project-replace.md) supplies any future multi-file transaction layer.
+Depends on [advanced find/replace](../future_features/done/04-advanced-find-replace.md). Keep the first goal within one document; [project replacement](../future_features/done/06-project-replace.md) supplies any future multi-file transaction layer.

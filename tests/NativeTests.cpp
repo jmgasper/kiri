@@ -139,6 +139,29 @@ static void Fixtures(const std::string& root) {
     }
     std::cout<<"Created a 200 MiB file and 100,000 source files.\n";
 }
+
+static void AdvancedSearch(kiri::Editor* editor) {
+    using namespace kiri;
+    const std::string original="é=12 日本語=7\r\nkeep=9\r\n";
+    editor->SetText(original);SearchOptions options;options.regex=true;options.matchCase=true;options.query="([\\p{L}]+)=(\\d+)";
+    CHECK(editor->SearchMatches(options).matches.size()==3);
+    CHECK(editor->SendMessage(SCI_INDICATORVALUEAT,8,0)!=0);
+    CHECK(editor->Replace(options,"$1:$2",true)==3);CHECK(editor->Text()=="é:12 日本語:7\r\nkeep:9\r\n");
+    editor->SendMessage(SCI_UNDO);CHECK(editor->Text()==original);CHECK(!editor->Dirty());
+    editor->SendMessage(SCI_SETSEL,0,17);editor->SetSearchSelection(true);
+    CHECK(editor->Replace(options,"${missing}",true)==0);CHECK(!editor->SearchError().empty());CHECK(editor->Text()==original);
+    CHECK(editor->Replace(options,"$1=$2!",true)==2);CHECK(editor->Text()=="é=12! 日本語=7!\r\nkeep=9\r\n");
+    editor->SendMessage(SCI_UNDO);CHECK(editor->Text()==original);editor->SetSearchSelection(false);
+    options.query="[";CHECK(editor->Replace(options,"oops",true)==0);CHECK(!editor->SearchError().empty());CHECK(editor->Text()==original);
+    options.query="(?=.)";editor->SetText("😀é");CHECK(editor->Replace(options,"x",true)==2);CHECK(editor->Text()=="x😀xé");editor->SendMessage(SCI_UNDO);CHECK(editor->Text()=="😀é");
+    editor->SendMessage(SCI_SETSEL,0,0);CHECK(editor->Find(options));CHECK(editor->SendMessage(SCI_GETCURRENTPOS)==0);
+    CHECK(editor->Find(options));CHECK(editor->SendMessage(SCI_GETCURRENTPOS)==4);CHECK(editor->Find(options));CHECK(editor->SendMessage(SCI_GETCURRENTPOS)==0);
+    CHECK(editor->Find(options,true));CHECK(editor->SendMessage(SCI_GETCURRENTPOS)==4);
+    options.query="name";options.regex=false;options.wholeWord=true;options.matchCase=false;editor->SetText("name names NAME\r\n");
+    CHECK(editor->SearchMatches(options).matches.size()==2);options.matchCase=true;CHECK(editor->SearchMatches(options).matches.size()==1);
+    editor->SendMessage(SCI_SETREADONLY,1);CHECK(editor->Find(options));CHECK(editor->Replace(options,"new",true)==0);CHECK(!editor->SearchError().empty());
+    CHECK(editor->Text()=="name names NAME\r\n");editor->SendMessage(SCI_SETREADONLY,0);editor->ClearSearchHighlights();CHECK(editor->SendMessage(SCI_INDICATORVALUEAT,8,0)==0);
+}
 int main(int argc,char** argv) {
     try {
         if(argc==3 && std::string(argv[1])=="--fixtures") { Fixtures(argv[2]);return 0; }
@@ -184,7 +207,7 @@ int main(int argc,char** argv) {
         editor->SetText("{\"key\": true, \"n\": 42}\n");editor->SetLanguage("test.json");editor->SendMessage(SCI_COLOURISE,0,-1);
         CHECK(editor->SendMessage(SCI_GETSTYLEAT,3)==SCE_JSON_PROPERTYNAME);CHECK(editor->SendMessage(SCI_GETSTYLEAT,8)==SCE_JSON_KEYWORD);
         editor->MarkRecovered();CHECK(editor->Dirty());editor->MarkSaved();CHECK(!editor->Dirty());
-        Preferences(editor);Icons();Recents();LanguageEdits(editor);
+        Preferences(editor);Icons();Recents();LanguageEdits(editor);AdvancedSearch(editor);
         auto loader=editor->CreateLoader(true);CHECK(loader->loader);
         std::thread loading([&]{CHECK(loader->loader->AddData("first\r\nsecond\r\n",15)==SC_STATUS_OK);});loading.join();editor->Adopt(*loader,0);
         CHECK(editor->Text()=="first\r\nsecond\r\n");CHECK(editor->SendMessage(SCI_GETLINECOUNT)==3);CHECK(!editor->Dirty());CHECK(editor->SendMessage(SCI_GETDOCUMENTOPTIONS)&SC_DOCUMENTOPTION_STYLES_NONE);

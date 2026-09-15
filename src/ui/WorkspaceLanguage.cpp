@@ -76,6 +76,7 @@ void Workspace::CloseLanguage(Document& document) {
     document.serverVersion=0;document.symbolVersion=-1;document.symbolRequest=0;document.completionRequest=0;document.languageDirty=true;
 }
 void Workspace::ResetLanguages() {
+    ClearRenameBorrowed();
     CancelCompletion();++fLanguageGeneration;
     for(auto& document:fDocuments) CloseLanguage(*document);
     for(auto& entry:fServers) if(entry.second.client) entry.second.client->Stop();

@@ -45,6 +45,7 @@ size_t OffsetAt(std::string_view text,TextPosition position,PositionEncoding enc
 }
 Json PositionJSON(TextPosition value) { return {{"line",value.line},{"character",value.character}}; }
 TextPosition ReadPosition(const Json& value) {
+    if(!value.at("line").is_number_integer() || !value.at("character").is_number_integer()) throw std::runtime_error("Invalid language server position");
     auto line=value.at("line").get<int64_t>(),character=value.at("character").get<int64_t>();
     if(line<0 || character<0 || line>INT32_MAX || character>INT32_MAX) throw std::runtime_error("Invalid language server position");
     return {static_cast<size_t>(line),static_cast<size_t>(character)};

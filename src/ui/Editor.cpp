@@ -323,6 +323,8 @@ void Editor::ContextMenu(BPoint where) {
     auto* formatItem=new BMenuItem("Format with Prettier",format);formatItem->SetEnabled(!SendMessage(SCI_GETREADONLY));menu.AddItem(formatItem);
     auto* completion=new BMessage(kComplete);completion->AddPointer("editor",this);
     auto* completeItem=new BMenuItem("Complete Code",completion);completeItem->SetEnabled(!SendMessage(SCI_GETREADONLY));menu.AddItem(completeItem);
+    auto* rename=new BMessage(kRenameSymbol);rename->AddPointer("editor",this);
+    menu.AddItem(new BMenuItem("Rename Symbol…",rename));
     menu.AddSeparatorItem();
     menu.AddItem(new BMenuItem("Copy GitHub Permalink",new BMessage(kCopyPermalink)));
     menu.AddItem(new BMenuItem("File History",new BMessage(kFileHistory)));
@@ -331,44 +333,79 @@ void Editor::ContextMenu(BPoint where) {
     menu.AddItem(new BMenuItem("Go to Line…",new BMessage(kGoToLine)));
     menu.SetTargetForItems(Window());menu.Go(where,true,true);
 }
-bool Editor::Find(const std::string& query,bool backwards,bool matchCase,bool regex) {
-    if(query.empty()) return false;
-    SendMessage(SCI_SETSEARCHFLAGS,(matchCase?SCFIND_MATCHCASE:0)|(regex?SCFIND_REGEXP:0));
-    auto start=SendMessage(backwards?SCI_GETSELECTIONSTART:SCI_GETSELECTIONEND);
-    auto length=SendMessage(SCI_GETLENGTH);
-    SendMessage(SCI_SETTARGETRANGE,start,backwards?0:length);
-    auto pos=SendMessage(SCI_SEARCHINTARGET,query.size(),reinterpret_cast<sptr_t>(query.data()));
-    if(pos<0) {
-        SendMessage(SCI_SETTARGETRANGE,backwards?length:0,start);
-        pos=SendMessage(SCI_SEARCHINTARGET,query.size(),reinterpret_cast<sptr_t>(query.data()));
-    }
-    if(pos<0) return false;
-    SendMessage(SCI_SETSEL,SendMessage(SCI_GETTARGETSTART),SendMessage(SCI_GETTARGETEND));SendMessage(SCI_SCROLLCARET);return true;
+
+void Editor::ClearSearchHighlights() {
+    SendMessage(SCI_SETINDICATORCURRENT,8);SendMessage(SCI_INDICATORCLEARRANGE,0,SendMessage(SCI_GETLENGTH));
 }
-bool Editor::ReplaceOne(const std::string& query,const std::string& replacement,bool matchCase) {
-    if(query.empty() || SendMessage(SCI_GETREADONLY)) return false;
+void Editor::SetSearchSelection(bool enabled) {
+    fSelectionSearch=enabled;fLastEmpty=-1;
+    fScopeStart=SendMessage(SCI_GETSELECTIONSTART);fScopeEnd=SendMessage(SCI_GETSELECTIONEND);
+    fScopeText=enabled?Text():std::string();
+}
+TextMatches Editor::SearchMatches(const SearchOptions& options,bool highlight) {
+    if(highlight) ClearSearchHighlights();fSearchError.clear();
+    TextMatches result;
+    if(fSelectionSearch && (!Matches(fScopeText) || fScopeStart==fScopeEnd)) result.error="Select text and enable In Selection again to capture a search scope.";
+    else { auto text=Text();result=TextQuery(options).Find(text,fSelectionSearch?fScopeStart:0,fSelectionSearch?fScopeEnd:SIZE_MAX); }
+    fSearchError=result.error;
+    if(highlight && result.error.empty()) {
+        SendMessage(SCI_INDICSETSTYLE,8,INDIC_ROUNDBOX);
+        SendMessage(SCI_INDICSETFORE,8,fTheme.accent.red|(fTheme.accent.green<<8)|(fTheme.accent.blue<<16));
+        SendMessage(SCI_INDICSETALPHA,8,65);SendMessage(SCI_INDICSETUNDER,8,1);
+        for(const auto& match:result.matches) if(match.end>match.start) SendMessage(SCI_INDICATORFILLRANGE,match.start,match.end-match.start);
+    }
+    return result;
+}
+bool Editor::Find(const SearchOptions& options,bool backwards) {
+    auto found=SearchMatches(options);if(found.matches.empty()) return false;
+    auto key=options.query+char(options.regex)+char(options.matchCase)+char(options.wholeWord);
+    if(key!=fLastQuery) { fLastQuery=key;fLastEmpty=-1; }
     auto start=SendMessage(SCI_GETSELECTIONSTART),end=SendMessage(SCI_GETSELECTIONEND);
-    SendMessage(SCI_SETSEARCHFLAGS,matchCase?SCFIND_MATCHCASE:0);
-    SendMessage(SCI_SETTARGETRANGE,start,end);
-    auto found=SendMessage(SCI_SEARCHINTARGET,query.size(),reinterpret_cast<sptr_t>(query.data()));
-    bool selected=found==start && start!=end && SendMessage(SCI_GETTARGETEND)==end;
-    if(!selected && !Find(query,false,matchCase)) return false;
-    SendMessage(SCI_REPLACESEL,0,reinterpret_cast<sptr_t>(replacement.c_str()));
-    return true;
-}
-int Editor::ReplaceAll(const std::string& query,const std::string& replacement,bool matchCase) {
-    if(query.empty() || SendMessage(SCI_GETREADONLY)) return 0;
-    int count=0;SendMessage(SCI_BEGINUNDOACTION);SendMessage(SCI_SETSEARCHFLAGS,matchCase?SCFIND_MATCHCASE:0);
-    sptr_t position=0;
-    while(position<=SendMessage(SCI_GETLENGTH)) {
-        SendMessage(SCI_SETTARGETRANGE,position,SendMessage(SCI_GETLENGTH));
-        auto found=SendMessage(SCI_SEARCHINTARGET,query.size(),reinterpret_cast<sptr_t>(query.data()));
-        if(found<0) break;
-        SendMessage(SCI_REPLACETARGET,replacement.size(),reinterpret_cast<sptr_t>(replacement.data()));
-        position=found+replacement.size();++count;
+    const TextEdit* selected=nullptr;
+    if(backwards) {
+        for(auto it=found.matches.rbegin();it!=found.matches.rend();++it)
+            if(it->end<=size_t(start) && !(it->start==it->end && sptr_t(it->start)==fLastEmpty)) { selected=&*it;break; }
+        if(!selected) selected=&found.matches.back();
+    } else {
+        for(const auto& match:found.matches)
+            if(match.start>=size_t(end) && !(match.start==match.end && sptr_t(match.start)==fLastEmpty)) { selected=&match;break; }
+        if(!selected) selected=&found.matches.front();
     }
-    SendMessage(SCI_ENDUNDOACTION);return count;
+    fLastEmpty=selected->start==selected->end?sptr_t(selected->start):-1;
+    SendMessage(SCI_SETSEL,selected->start,selected->end);SendMessage(SCI_SCROLLCARET);return true;
 }
+int Editor::Replace(const SearchOptions& options,const std::string& replacement,bool all) {
+    fSearchError.clear();
+    if(SendMessage(SCI_GETREADONLY)) { fSearchError="This document is read-only.";return 0; }
+    auto initial=SearchMatches(options,false);if(!initial.error.empty()) return 0;
+    auto text=Text();auto found=TextQuery(options).Find(text,fSelectionSearch?fScopeStart:0,fSelectionSearch?fScopeEnd:SIZE_MAX,100000,nullptr,&replacement);
+    if(!found.error.empty() || found.truncated) { fSearchError=found.truncated?"More than 100,000 matches. Narrow the selection before replacing.":found.error;return 0; }
+    if(found.matches.empty()) return 0;
+    std::vector<TextEdit> edits;
+    if(all) edits=std::move(found.matches);
+    else {
+        auto start=SendMessage(SCI_GETSELECTIONSTART),end=SendMessage(SCI_GETSELECTIONEND);
+        auto chosen=found.matches.end();
+        for(auto it=found.matches.begin();it!=found.matches.end();++it) if(it->start==size_t(start) && it->end==size_t(end)) { chosen=it;break; }
+        if(chosen==found.matches.end()) chosen=std::find_if(found.matches.begin(),found.matches.end(),[&](const auto& m){return m.start>=size_t(end);});
+        if(chosen==found.matches.end()) chosen=found.matches.begin();
+        edits.push_back(*chosen);
+    }
+    ApplyEdits(edits);
+    if(fSelectionSearch) {
+        for(const auto& edit:edits) fScopeEnd=fScopeEnd-(edit.end-edit.start)+edit.text.size();
+        fScopeText=Text();
+    }
+    if(!all) {
+        auto position=edits[0].start+edits[0].text.size();
+        if(edits[0].start==edits[0].end) position=SendMessage(SCI_POSITIONAFTER,position);
+        SendMessage(SCI_SETSEL,position,position);
+    }
+    fLastEmpty=-1;SearchMatches(options);return int(edits.size());
+}
+bool Editor::Find(const std::string& query,bool backwards,bool matchCase,bool regex) { return Find(SearchOptions{query,matchCase,regex,false},backwards); }
+bool Editor::ReplaceOne(const std::string& query,const std::string& replacement,bool matchCase) { return Replace(SearchOptions{query,matchCase,false,false},replacement,false)>0; }
+int Editor::ReplaceAll(const std::string& query,const std::string& replacement,bool matchCase) { return Replace(SearchOptions{query,matchCase,false,false},replacement,true); }
 void Editor::GoTo(size_t line,size_t column,bool focus) {
     sptr_t pos=SendMessage(SCI_POSITIONFROMLINE,line?line-1:0);
     if(pos<0) pos=SendMessage(SCI_GETLENGTH);

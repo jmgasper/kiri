@@ -195,9 +195,10 @@ LanguageServer::LanguageServer(std::vector<std::string> command,const std::strin
     },[this](const std::string& error) { fReady=false;if(fState) fState(error); });
     Json capabilities={
         {"general",{{"positionEncodings",Json::array({"utf-8","utf-16"})}}},
-        {"workspace",{{"configuration",true},{"workspaceFolders",true},{"applyEdit",false}}},
+        {"workspace",{{"configuration",true},{"workspaceFolders",true},{"applyEdit",false},{"workspaceEdit",{{"documentChanges",true},{"resourceOperations",Json::array()},{"failureHandling","abort"}}}}},
         {"textDocument",{
             {"synchronization",{{"dynamicRegistration",false},{"didSave",true}}},
+            {"rename",{{"dynamicRegistration",false},{"prepareSupport",true},{"prepareSupportDefaultBehavior",1}}},
             {"completion",{{"dynamicRegistration",false},{"contextSupport",true},{"completionItem",{
                 {"snippetSupport",false},{"insertReplaceSupport",true},{"documentationFormat",Json::array({"plaintext"})},
                 {"resolveSupport",{{"properties",Json::array({"detail","documentation","additionalTextEdits"})}}}}}}},

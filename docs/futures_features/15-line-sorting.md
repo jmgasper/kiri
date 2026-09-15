@@ -30,4 +30,4 @@ sample. Leave duplicate removal and broader text transformations for separately 
 
 ## Dependencies and review decisions
 
-Reuse regex semantics from [advanced find](04-advanced-find-replace.md). Decide stable ordering for equal/missing keys and whether locale-sensitive collation is required.
+Reuse regex semantics from [advanced find](../future_features/done/04-advanced-find-replace.md). Decide stable ordering for equal/missing keys and whether locale-sensitive collation is required.

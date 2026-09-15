@@ -8,6 +8,7 @@ It does not use the separate Haiku hardware/ARM64 workspace.
 ```sh
 bash tools/run-vm.sh
 bash tools/haiku.sh 'uname -a'
+bash tools/haiku.sh 'pkgman install -y libpcre2_devel'
 bash tools/build-in-vm.sh
 bash tools/haiku.sh 'open /boot/home/kiri/build-haiku/Kiri'
 bash tools/haiku.sh 'hey Kiri let Window 0 do oppr with path=/boot/home/kiri'
@@ -55,7 +56,7 @@ before attempting to start another instance; do not infer termination from an SS
 3. In the live desktop, initialize **only the new blank disk** as BFS, then use
    Installer to install Haiku with development tools to that disk. Select gcc,
    binutils, make, makefile_engine and their dependencies from the optional packages.
-4. Start the installed system. Install `scintilla_devel` and `lexilla_devel`.
+4. Start the installed system. Install `scintilla_devel`, `lexilla_devel` and `libpcre2_devel`.
 5. Generate a dedicated ed25519 key on the host in `.vm/id_ed25519`. Put its
    public key in `/boot/home/config/settings/ssh/authorized_keys` in the VM.
    Set that directory to mode 700 and the key file to mode 600.

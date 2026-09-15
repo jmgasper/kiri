@@ -167,8 +167,10 @@ bool Workspace::CloseTab(int index) {
     return fActivePane && index>=0 && index<int(fActivePane->tabs.size()) && CloseView(fActivePane->tabs[index]->id);
 }
 bool Workspace::CloseView(int64 id,bool remember,bool collapse) {
+    if(fApplyingEdit) { Notice("Wait for the project edit to finish before closing files.");return false; }
     Pane* pane=nullptr;auto* tab=FindTab(id,&pane);if(!tab) return false;
     auto* d=ByID(tab->document);bool last=ViewCount(d->id)==1;
+    if(d && !d->path.empty() && EditPathBusy(d->path)) { Notice("Wait for the project edit to finish before closing this file.");return false; }
     if(last && d->saving) { d->closeAfterSave=true;d->closeView=id;return false; }
     if(last && tab->editor && tab->editor->Dirty()) {
         ActivatePane(pane);SelectTab(std::find_if(pane->tabs.begin(),pane->tabs.end(),[&](const auto& t){return t->id==id;})-pane->tabs.begin());

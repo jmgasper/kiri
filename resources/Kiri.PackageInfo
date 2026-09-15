@@ -17,6 +17,7 @@ requires {
     haiku >= r1~beta5
     lib:libscintilla >= 5.3.4
     lib:liblexilla >= 5.4.6
+    lib:libpcre2_8
     cmd:git
 }
 post-install-scripts {

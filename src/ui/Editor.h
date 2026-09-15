@@ -3,6 +3,7 @@
 #include "ui/Theme.h"
 #include "ui/EditorSettings.h"
 #include "core/LanguageProtocol.h"
+#include "core/Search.h"
 #include <string>
 #include <ILoader.h>
 #include <memory>
@@ -47,6 +48,12 @@ public:
     bool Find(const std::string& query,bool backwards=false,bool matchCase=false,bool regex=false);
     bool ReplaceOne(const std::string& query,const std::string& replacement,bool matchCase=false);
     int ReplaceAll(const std::string& query,const std::string& replacement,bool matchCase=false);
+    void SetSearchSelection(bool enabled);
+    TextMatches SearchMatches(const SearchOptions& options,bool highlight=true);
+    bool Find(const SearchOptions& options,bool backwards=false);
+    int Replace(const SearchOptions& options,const std::string& replacement,bool all);
+    const std::string& SearchError() const { return fSearchError; }
+    void ClearSearchHighlights();
     void GoTo(size_t line,size_t column=1,bool focus=true);
 private:
     void Style(int id,rgb_color color,bool bold=false);
@@ -58,5 +65,9 @@ private:
     int fDigits=0;
     std::shared_ptr<EditorState> fState=std::make_shared<EditorState>();
     std::vector<std::string> fCompletionLabels;
+    bool fSelectionSearch=false;
+    size_t fScopeStart=0,fScopeEnd=0;
+    std::string fScopeText,fSearchError,fLastQuery;
+    sptr_t fLastEmpty=-1;
 };
 }

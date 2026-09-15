@@ -30,4 +30,4 @@ proposals separate from the live document until accepted and validate revisions 
 
 ## Dependencies and review decisions
 
-Make provider choice, data handling and cost explicit during review. Reuse the edit transaction from [rename](29-symbol-rename.md); autonomous command execution, multi-agent orchestration and full-project indexing are separate possible goals.
+Make provider choice, data handling and cost explicit during review. Reuse the edit transaction from [rename](../future_features/done/29-symbol-rename.md); autonomous command execution, multi-agent orchestration and full-project indexing are separate possible goals.

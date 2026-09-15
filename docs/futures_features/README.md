@@ -3,11 +3,11 @@
 Researched **2026-09-14** against Kiri **0.0.1 alpha**, source commit
 `5ab4ba5517cf04f9de8ab05aad596f9cb9933215`.
 
-This catalog contains **48 draft proposals and 2 completed features** based on features found in CodeEdit,
+This catalog contains **44 draft proposals and 6 completed features** based on features found in CodeEdit,
 CotEditor and JetBrains Fleet. Each file describes the reference behavior,
 Kiri's current support, a candidate scope, acceptance checks, dependencies and
 decisions to make before handing it to Codex as an implementation goal. Completed
-features 01 and 25 are archived in [the done folder](../future_features/done/);
+features 01, 04, 05, 06, 25 and 29 are archived in [the done folder](../future_features/done/);
 their acceptance checks record implementation verification.
 
 The scopes, priorities and sizes are suggestions for the owner to edit. The
@@ -39,8 +39,8 @@ and qualifications appear in each feature file.
 
 ## Suggested review order
 
-- **Soon:** everyday workflow gaps and useful foundations; 15 proposals.
-- **Next:** useful additions after the relevant foundations; 20 proposals.
+- **Soon:** everyday workflow gaps and useful foundations; 12 proposals.
+- **Next:** useful additions after the relevant foundations; 19 proposals.
 - **Later:** optional polish or more specialized workflows; 9 proposals.
 - **Research:** resolve Haiku/tooling/architecture feasibility first; 4 proposals.
 
@@ -51,7 +51,6 @@ IDs are stable references, not an implementation sequence.
 
 A useful first review set is [comment toggling](10-toggle-comments.md),
 [indentation settings](09-editorconfig-indentation.md),
-[advanced find/replace](04-advanced-find-replace.md),
 [external refresh](08-external-file-refresh.md),
 [diagnostics](26-diagnostics.md), [code navigation](27-code-navigation.md) and
 [saved tasks](33-task-runner.md). Implemented [splits](../future_features/done/01-split-editors.md)
@@ -75,9 +74,9 @@ remain a larger candidate.
 
 | ID | Proposal | Evidence | Kiri gap | Priority / size |
 | --- | --- | --- | --- | --- |
-| 04 | [Regex and scoped document replacement](04-advanced-find-replace.md) | CO | Partial | Soon / M |
-| 05 | [Filtered and regex project search](05-scoped-project-search.md) | CE, F | Partial | Soon / M |
-| 06 | [Previewed project-wide replacement](06-project-replace.md) | CE | Missing | Soon / L |
+| 04 | [Regex and scoped document replacement](../future_features/done/04-advanced-find-replace.md) | CO | Done | Implemented / M |
+| 05 | [Filtered and regex project search](../future_features/done/05-scoped-project-search.md) | CE, F | Done | Implemented / M |
+| 06 | [Previewed project-wide replacement](../future_features/done/06-project-replace.md) | CE | Done | Implemented / L |
 | 07 | [Explorer file operations](07-explorer-file-operations.md) | CE | Partial | Soon / L |
 | 08 | [External reload and automatic project refresh](08-external-file-refresh.md) | CE | Partial | Soon / M |
 | 16 | [Saved replacement sequences](16-replacement-pipelines.md) | CO | Missing | Later / M |
@@ -106,7 +105,7 @@ remain a larger candidate.
 | 26 | [Diagnostics and Problems panel](26-diagnostics.md) | F | Missing | Soon / L |
 | 27 | [Definitions, references and workspace symbols](27-code-navigation.md) | F | Partial | Soon / L |
 | 28 | [Quick documentation and signature help](28-hover-signature-help.md) | F | Missing | Next / M |
-| 29 | [Previewed symbol rename](29-symbol-rename.md) | F | Missing | Next / L |
+| 29 | [Previewed symbol rename](../future_features/done/29-symbol-rename.md) | F | Done | Implemented / L |
 | 30 | [Quick fixes and code actions](30-code-actions.md) | F | Missing | Next / L |
 | 31 | [Semantic highlighting](31-semantic-highlighting.md) | CE | Partial | Later / M |
 | 32 | [Additional formatters and format on save](32-formatting-providers.md) | F | Partial | Next / M |

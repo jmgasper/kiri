@@ -43,8 +43,10 @@ bool Workspace::MoveTab(int64 id,Pane& destination,int slot) {
 }
 
 Workspace* Workspace::DetachTab(int64 id,BPoint screenPoint) {
+    if(fApplyingEdit) { Notice("Wait for the project edit to finish before detaching files.");return nullptr; }
     Pane* source=nullptr;auto* tab=FindTab(id,&source);if(!tab) return nullptr;
     auto* document=ByID(tab->document);
+    if(EditPathBusy(document->path)) { Notice("Wait for the project edit to finish before detaching this file.");return nullptr; }
     if(fQuitWhenSaved || document->closeAfterSave || (fSavePanel && fSavePanel->IsShowing() && fSavePanelID==document->id)) {
         Notice("Finish saving this document before moving it to a new window.");return nullptr;
     }

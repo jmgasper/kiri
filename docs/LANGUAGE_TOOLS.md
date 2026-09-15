@@ -82,3 +82,11 @@ available. Server messages, output, queued work and requests are bounded.
 References: [Prettier CLI](https://prettier.io/docs/cli),
 [Language Server Protocol 3.17](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/),
 [TypeScript language server](https://github.com/typescript-language-server/typescript-language-server).
+
+## Symbol rename
+
+**Edit → Rename Symbol…** previews a language-server rename across source files,
+including unsaved buffers. Apply checks snapshots before changing files;
+**Undo Last Project Edit…** restores the operation, including closed-file writes.
+See [search and refactoring](SEARCH_AND_REFACTORING.md) for supported edits,
+name validation, save behavior and recovery.

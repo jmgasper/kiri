@@ -1,4 +1,5 @@
 #include "core/LanguageProtocol.h"
+#include "core/EditTransaction.h"
 #include "core/LanguageServer.h"
 #include "core/LanguageTools.h"
 #include "core/FileIO.h"
@@ -202,6 +203,35 @@ static void RealTools(const std::string& settings) {
     reply=Request(*server,"textDocument/documentSymbol",{{"textDocument",{{"uri",uri}}}});
     CHECK(reply.ok());symbols=ReadSymbols(reply.result,changed,uri,server->Encoding());CHECK(std::any_of(symbols.begin(),symbols.end(),[](const auto& symbol){return symbol.name=="afterChange";}));
     server->Close(uri);std::cout<<"Real Prettier and TypeScript LSP integration passed\n";
+    {
+        auto renameProject=temp.path+"/rename";fs::create_directory(renameProject);
+        auto declaration=renameProject+"/shared.ts",usage=renameProject+"/usage.ts";
+        std::string saved="export function greet(name: string) { return name; }\n";
+        std::string dirty=saved+"// unsaved 😀\n";
+        std::string uses="import { greet } from './shared';\nconst untouched = 'greet';\ngreet('Kiri');\nfunction isolated(greet: string) { return greet; }\n";
+        Write(declaration,saved);Write(usage,uses);Write(renameProject+"/tsconfig.json","{\"include\":[\"*.ts\"]}");
+        auto renameServer=Start(ToolCommand("typescript-language-server --stdio",declaration,renameProject,settings),renameProject,Json::parse(LanguageTools().ForFile(declaration)->initializationOptions));
+        auto declarationURI=FileURI(declaration);renameServer->Open(declarationURI,"typescript",1,dirty);
+        auto prepare=Request(*renameServer,"textDocument/prepareRename",{{"textDocument",{{"uri",declarationURI}}},{"position",PositionJSON(PositionAt(dirty,17,renameServer->Encoding()))}});
+        CHECK(prepare.ok());CHECK(!prepare.result.is_null());
+        auto renamed=Request(*renameServer,"textDocument/rename",{{"textDocument",{{"uri",declarationURI}}},{"position",PositionJSON(PositionAt(dirty,17,renameServer->Encoding()))},{"newName","welcome"}});
+        CHECK(renamed.ok());
+        auto plan=WorkspaceEditPlan(renamed.result,renameServer->Encoding(),[&](const std::string& path) {
+            auto snap=DiskSnapshot(path);if(path==declaration) { snap.open=true;snap.version=1;snap.text=dirty; }return snap;
+        });
+        if(plan.files.size()!=2) std::cerr<<"Rename reply: "<<renamed.result.dump(2)<<"\n";
+        CHECK(plan.files.size()==2);
+        for(auto& file:plan.files) {
+            if(file.before.path==declaration) CHECK(file.after=="export function welcome(name: string) { return name; }\n// unsaved 😀\n");
+            else {
+                CHECK(file.before.path==usage);CHECK(file.after=="import { welcome } from './shared';\nconst untouched = 'greet';\nwelcome('Kiri');\nfunction isolated(greet: string) { return greet; }\n");
+                CHECK(ApplyDiskEdit(file).empty());CHECK(ReadFile(usage).bytes==file.after);CHECK(ApplyDiskEdit(file,true).empty());CHECK(ReadFile(usage).bytes==uses);
+            }
+        }
+        CHECK(ReadFile(declaration).bytes==saved);renameServer->Close(declarationURI);
+        std::cout<<"Real TypeScript prepareRename, cross-file rename, unrelated text and restore passed\n";
+    }
+
     auto clang=ToolCommand("clangd",project+"/test.cpp",project,settings);
     if(!clang.empty() && access(clang[0].c_str(),X_OK)==0) {
         file=project+"/test.cpp";text="struct Widget { int count; void reset() { count = 0; } };\nint total = 0;\nint main() { /* 😀 */ Widget item; item.co; }\n";

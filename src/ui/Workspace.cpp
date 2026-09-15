@@ -26,6 +26,7 @@
 #include <ListView.h>
 #include <MenuBar.h>
 #include <MenuItem.h>
+#include <MenuField.h>
 #include <MessageRunner.h>
 #include <MessageFilter.h>
 #include <Path.h>
@@ -92,12 +93,34 @@ public:
         fResults=new BListView("results");fResults->SetInvocationMessage(new BMessage(kQueryResult));
         if(preview) fResults->SetSelectionMessage(new BMessage(kQueryPreview));
         fResults->SetExplicitMinSize(BSize(480,240));fQuery->TextView()->AddFilter(new SearchNavigation(fResults));
-        fStatus=new BStringView("search status",search?"Search text in project files":"Type part of a file path");
+        fStatus=new BStringView("search status",search?"Search text in project files":"Type part of a file path");fStatus->SetTruncation(B_TRUNCATE_END);fStatus->SetExplicitMinSize(BSize(200,24));
         auto* panel=new BView("search panel",B_WILL_DRAW);
-        BLayoutBuilder::Group<>(panel,B_VERTICAL,8).SetInsets(12).Add(fQuery).Add(new BScrollView("results scroll",fResults,0,false,true,B_NO_BORDER)).Add(fStatus);
+        auto layout=BLayoutBuilder::Group<>(panel,B_VERTICAL,8).SetInsets(12);
+        layout.Add(fQuery);
+        if(search) {
+            fCase=new BCheckBox("project case","Case",new BMessage(kQueryChanged));
+            fRegex=new BCheckBox("project regex","Regex",new BMessage(kQueryChanged));
+            fWord=new BCheckBox("project word","Whole Word",new BMessage(kQueryChanged));
+            fIgnored=new BCheckBox("project ignored","Include ignored files",new BMessage(kQueryChanged));
+            fFolders=new BTextControl("folders","Folders","",new BMessage(kQueryChanged));
+            fInclude=new BTextControl("include","Include","",new BMessage(kQueryChanged));
+            fExclude=new BTextControl("exclude","Exclude","",new BMessage(kQueryChanged));
+            fReplacement=new BTextControl("project replacement","Replace","",new BMessage(kProjectReplace));
+            fFolders->SetToolTip("Project-relative folders separated by semicolons: src;tests");
+            fInclude->SetToolTip("Semicolon-separated globs: *.cpp;*.h. * spans folders; **/ also matches the project root.");
+            fExclude->SetToolTip("Exclude globs, for example: generated/*;*.min.js");
+            for(auto* field:{fFolders,fInclude,fExclude}) { field->SetModificationMessage(new BMessage(kQueryChanged));field->SetTarget(this); }
+            for(auto* box:{fCase,fRegex,fWord,fIgnored}) box->SetTarget(this);
+            fReplacement->SetTarget(this);
+            auto* replace=new BButton("preview replacement","Preview Replace…",new BMessage(kProjectReplace));replace->SetTarget(this);
+            layout.AddGroup(B_HORIZONTAL,8).Add(fCase).Add(fRegex).Add(fWord).Add(fIgnored).AddGlue().End()
+                .Add(fFolders).AddGroup(B_HORIZONTAL,8).Add(fInclude).Add(fExclude).End()
+                .AddGroup(B_HORIZONTAL,8).Add(fReplacement).Add(replace).End();
+        }
+        layout.Add(new BScrollView("results scroll",fResults,0,false,true,B_NO_BORDER)).Add(fStatus);
         BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(panel);
         fQuery->SetTarget(this);fResults->SetTarget(this);for(int32 i=0;i<CountChildren();++i) ThemeView(ChildAt(i),theme);fJobs=std::make_unique<AsyncQueue>(BMessenger(this));
-        ResizeTo(700,420);AddShortcut(B_ESCAPE,0,new BMessage(kPromptCancel));CenterIn(owner->Frame());fQuery->MakeFocus();Query();Show();
+        ResizeTo(850,search?570:420);AddShortcut(B_ESCAPE,0,new BMessage(kPromptCancel));CenterIn(owner->Frame());fQuery->MakeFocus();Query();Show();
     }
     ~SearchWindow() override { fTimer.reset();fJobs.reset();while(auto* item=fResults->RemoveItem(int32(0))) delete item; }
     void MessageReceived(BMessage* message) override {
@@ -105,45 +128,62 @@ public:
         else if(message->what==kPromptCancel) PostMessage(B_QUIT_REQUESTED);
         else if(message->what==kQueryChanged) {
             fJobs->Cancel("query");
-            ++fGeneration;BMessage request(kProjectSearch);fTimer=std::make_unique<BMessageRunner>(BMessenger(this),&request,120000,1);
+            ++fGeneration;fMatches.clear();fRows.clear();while(auto* item=fResults->RemoveItem(int32(0))) delete item;fStatus->SetText("Searching disk…");BMessage request(kProjectSearch);fTimer=std::make_unique<BMessageRunner>(BMessenger(this),&request,120000,1);
         } else if(message->what==kProjectSearch) Query();
-        else if(message->what==kQueryResult || message->what==kQueryPreview) {
-            int32 selected=fResults->CurrentSelection();if(selected<0 && !fMatches.empty()) selected=0;
-            if(selected>=0 && selected<static_cast<int32>(fMatches.size())) {
-                auto& match=fMatches[selected];BMessage request(kOpenFile);request.AddString("path",(fs::path(fRoot)/match.path).c_str());
-                request.AddInt64("line",match.line);request.AddInt64("column",match.column);request.AddBool("preview",message->what==kQueryPreview);fTarget.SendMessage(&request);if(message->what==kQueryResult) PostMessage(B_QUIT_REQUESTED);
+        else if(message->what==kProjectReplace && fSearch) {
+            auto options=Options();BMessage request(kProjectReplace);
+            request.AddString("root",fRoot.c_str());request.AddString("query",options.query.c_str());request.AddString("replacement",fReplacement->Text());
+            request.AddString("folders",options.folders.c_str());request.AddString("include",options.include.c_str());request.AddString("exclude",options.exclude.c_str());
+            request.AddBool("case",options.matchCase);request.AddBool("regex",options.regex);request.AddBool("word",options.wholeWord);request.AddBool("ignored",options.includeIgnored);
+            fTarget.SendMessage(&request);
+        } else if(message->what==kQueryResult || message->what==kQueryPreview) {
+            int32 selected=fResults->CurrentSelection();
+            if(selected<0 && !fRows.empty()) selected=fSearch?1:0;
+            if(selected>=0 && selected<int32(fRows.size()) && fRows[selected]>=0) {
+                auto& match=fMatches[fRows[selected]];BMessage request(kOpenFile);request.AddString("path",(fs::path(fRoot)/match.path).c_str());
+                request.AddString("search_project",fRoot.c_str());request.AddInt64("line",match.line);request.AddInt64("column",match.column);
+                request.AddBool("preview",message->what==kQueryPreview);fTarget.SendMessage(&request);if(message->what==kQueryResult) PostMessage(B_QUIT_REQUESTED);
             }
         } else BWindow::MessageReceived(message);
     }
 private:
+    ProjectSearchOptions Options() const {
+        ProjectSearchOptions options;options.query=fQuery->Text();
+        if(fSearch) { options.matchCase=fCase->Value();options.regex=fRegex->Value();options.wholeWord=fWord->Value();options.includeIgnored=fIgnored->Value();
+            options.folders=fFolders->Text();options.include=fInclude->Text();options.exclude=fExclude->Text(); }
+        return options;
+    }
     void Query() {
-        auto query=std::string(fQuery->Text());auto generation=++fGeneration;auto root=fRoot;auto index=fIndex;bool search=fSearch;
-        fJobs->Submit([this,query,generation,root,index,search](const auto& cancel) mutable {
-            if(index->paths.empty()) index=std::make_shared<ProjectIndex>(IndexProject(root,&cancel));
+        auto options=Options();auto generation=++fGeneration;auto root=fRoot;auto index=fIndex;bool search=fSearch;
+        fStatus->SetText(search?"Searching files on disk…":"Finding paths…");
+        fJobs->Submit([this,options,generation,root,index,search](const auto& cancel) mutable {
+            if(search || index->paths.empty()) index=std::make_shared<ProjectIndex>(IndexProject(root,&cancel,500000,options.includeIgnored));
             SearchResult result;
-            if(search) result=SearchProject(root,*index,query,false,&cancel);
-            else for(auto& path:QuickOpen(*index,query)) result.matches.push_back({path,"",1,1});
+            if(search) result=SearchProject(root,*index,options,&cancel);
+            else for(auto& path:QuickOpen(*index,options.query)) result.matches.push_back({path,"",1,1,0,0,{}});
             return [this,result=std::move(result),generation,search,index] {
                 if(generation!=fGeneration) return;
                 while(auto* item=fResults->RemoveItem(int32(0))) delete item;
-                fMatches=result.matches;
-                fIndex=index;
-                for(const auto& match:fMatches) {
-                    std::string label=match.path;
-                    if(search) label+=":"+std::to_string(match.line)+"    "+match.text;
-                    fResults->AddItem(new SearchItem(label.c_str(),fTheme));
+                fMatches=result.matches;fRows.clear();fIndex=index;std::string previous;
+                for(size_t i=0;i<fMatches.size();++i) {
+                    const auto& match=fMatches[i];
+                    if(search && previous!=match.path) { auto* header=new SearchItem(match.path.c_str(),fTheme);header->SetEnabled(false);fResults->AddItem(header);fRows.push_back(-1);previous=match.path; }
+                    std::string label=search?"    "+std::to_string(match.line)+":"+std::to_string(match.column)+"    "+match.text:match.path;
+                    fResults->AddItem(new SearchItem(label.c_str(),fTheme));fRows.push_back(int(i));
                 }
-                fResults->Select(0);
-                std::string status=std::to_string(fMatches.size())+(fMatches.size()==1?" result":" results");
-                if(result.truncated) status+=" · refine your search for more";
-                if(index->truncated) status+=" · project index capped at 500,000 files";
-                if(result.skipped) status+=" · "+std::to_string(result.skipped)+" binary, large or unavailable files skipped";
-                fStatus->SetText(status.c_str());
+                if(!fRows.empty()) fResults->Select(search?1:0);
+                std::string status=search?"Disk only · "+result.Summary():std::to_string(fMatches.size())+" files";
+                if(index->truncated) status+=" · index limit: 500,000 files";
+                if(!index->error.empty()) status+=" · "+index->error;
+                fStatus->SetText(status.c_str());fStatus->SetToolTip(status.c_str());
             };
-        },"query");
+        },"query",[this,generation](const std::string& error){if(generation==fGeneration) fStatus->SetText(error.c_str());});
     }
     BMessenger fTarget;std::string fRoot;std::shared_ptr<ProjectIndex> fIndex;bool fSearch;Theme fTheme;
     BTextControl* fQuery;BListView* fResults;BStringView* fStatus;
+    BTextControl *fFolders=nullptr,*fInclude=nullptr,*fExclude=nullptr,*fReplacement=nullptr;
+    BCheckBox *fCase=nullptr,*fRegex=nullptr,*fWord=nullptr,*fIgnored=nullptr;
+    std::vector<int> fRows;
     std::vector<SearchMatch> fMatches;std::unique_ptr<AsyncQueue> fJobs;std::unique_ptr<BMessageRunner> fTimer;int64 fGeneration=0;
 };
 }
@@ -154,10 +194,12 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession,co
     fSessionDirectory=sessionDirectory.empty()?fSettings:sessionDirectory;create_directory(fSessionDirectory.c_str(),0700);
     RecentItems(fSettings).Load();
     fLanguageTools.Load(fSettings);
+    try { auto data=ReadFile(fSettings+"/search-history.json",nullptr,128*1024);if(data.ok()) { auto history=Json::parse(data.bytes);for(const auto& item:history) { if(item.is_string() && fRecentQueries.size()<20) fRecentQueries.push_back(item.get<std::string>()); } } }catch(...) {}
     fJobs=std::make_unique<AsyncQueue>(BMessenger(this),2);
     fLoaderFactory=std::make_unique<Editor>();
     fRecoveryDirectory=fSessionDirectory+"/recovery";create_directory(fRecoveryDirectory.c_str(),0700);
     fSessionToken=std::to_string(time(nullptr))+"-"+std::to_string(getpid())+"-"+std::to_string(system_time());
+    RegisterEditWorkspace(true);
     fRecoveryJobs=std::make_unique<AsyncQueue>(BMessenger(this));
     fExplorer=new Explorer();fExplorer->requestDirectory=[this](std::string path){LoadDirectory(path);};
     fRefresh=new RefreshButton(new BMessage(kRefresh));
@@ -170,10 +212,22 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession,co
     fPaneHost=new BView("editor panes",0);
     BLayoutBuilder::Group<>(fPaneHost,B_VERTICAL,0).Add(fLayout->View());
     fFindBar=new BView("find bar",0);fFindText=new BTextControl("find text","Find","",new BMessage(kFindNext));
-    fReplaceText=new BTextControl("replace text","Replace","",new BMessage(kReplace));fMatchCase=new BCheckBox("case","Aa",nullptr);
-    BLayoutBuilder::Group<>(fFindBar,B_HORIZONTAL,5).SetInsets(8,5,8,5).Add(fFindText).Add(fReplaceText).Add(fMatchCase)
-        .Add(new BButton("previous","‹",new BMessage(kFindPrevious))).Add(new BButton("next","›",new BMessage(kFindNext)))
-        .Add(new BButton("replace all","All",new BMessage(kReplaceAll))).Add(new BButton("hide find","×",new BMessage(kFind)));
+    fReplaceText=new BTextControl("replace text","Replace","",new BMessage(kReplace));
+    fMatchCase=new BCheckBox("case","Case",new BMessage(kFindChanged));
+    fRegex=new BCheckBox("regex","Regex",new BMessage(kFindChanged));
+    fWholeWord=new BCheckBox("whole word","Whole Word",new BMessage(kFindChanged));
+    fInSelection=new BCheckBox("in selection","In Selection",new BMessage(kFindScope));
+    fFindText->SetModificationMessage(new BMessage(kFindChanged));
+    fFindHistory=new BMenuField("find history","",new BMenu("Recent"));
+    for(const auto& recent:fRecentQueries) { auto* message=new BMessage(kFindHistory);message->AddString("query",recent.c_str());auto* item=new BMenuItem(recent.c_str(),message);item->SetTarget(this);fFindHistory->Menu()->AddItem(item); }
+    fFindStatus=new BStringView("find status","");fFindStatus->SetTruncation(B_TRUNCATE_END);fFindStatus->SetExplicitMinSize(BSize(120,20));
+    fReplaceText->SetToolTip("Regex replacement: $0..$99, ${name}, $$, \\n, \\r, \\t, \\\\. Literal mode uses the exact replacement text.");
+    BLayoutBuilder::Group<>(fFindBar,B_VERTICAL,4).SetInsets(8,5,8,5)
+        .AddGroup(B_HORIZONTAL,5).Add(fFindText).Add(fReplaceText)
+            .Add(new BButton("previous","‹",new BMessage(kFindPrevious))).Add(new BButton("next","›",new BMessage(kFindNext)))
+            .Add(new BButton("replace one","Replace",new BMessage(kReplace))).Add(new BButton("replace all","All",new BMessage(kReplaceAll)))
+            .Add(new BButton("hide find","×",new BMessage(kFind))).End()
+        .AddGroup(B_HORIZONTAL,8).Add(fMatchCase).Add(fRegex).Add(fWholeWord).Add(fInSelection).Add(fFindHistory).Add(fFindStatus).AddGlue();
     auto* editorPanel=new BView("editor panel",0);
     fSymbolBar=new SymbolBar();
     BLayoutBuilder::Group<>(editorPanel,B_VERTICAL,0).Add(fSymbolBar).Add(fFindBar).Add(fPaneHost);
@@ -198,7 +252,11 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession,co
     BMessage opened(kWorkspaceOpened);opened.AddMessenger("workspace",BMessenger(this));be_app->PostMessage(&opened);
 }
 Workspace::~Workspace() {
+    RegisterEditWorkspace(false);
     BMessage closed(kWorkspaceClosed);closed.AddMessenger("workspace",BMessenger(this));be_app->PostMessage(&closed);
+    for(auto& window:fSearchWindows) if(window.IsValid()) window.SendMessage(B_QUIT_REQUESTED);
+    if(fEditWindow.IsValid()) fEditWindow.SendMessage(B_QUIT_REQUESTED);
+    if(fRenameWindow.IsValid()) fRenameWindow.SendMessage(B_QUIT_REQUESTED);
     if(fPreferencesWindow.IsValid()) fPreferencesWindow.SendMessage(B_QUIT_REQUESTED);
     if(fLanguageToolsWindow.IsValid()) fLanguageToolsWindow.SendMessage(B_QUIT_REQUESTED);
     fDetachTimer.reset();fLanguageTimer.reset();for(auto& entry:fServers) if(entry.second.client) entry.second.client->Stop();fServers.clear();
@@ -220,7 +278,7 @@ BMenuBar* Workspace::BuildMenus() {
     auto* file=new BMenu("File");add(file,"New File",kNewFile,'N');add(file,"Open File…",kOpenFile,'O');add(file,"Open Folder…",kOpenProject,'O',B_SHIFT_KEY);add(file,"Show Launcher…",kShowLauncher);file->AddSeparatorItem();
     add(file,"Save",kSave,'S');add(file,"Save As…",kSaveAs,'S',B_SHIFT_KEY);add(file,"Save All",kSaveAll);add(file,"Close Tab",kCloseTab,'W');add(file,"Keep Open",kKeepTab,'K');add(file,"Reopen Closed Tab",kReopenTab,'W',B_SHIFT_KEY);file->AddSeparatorItem();add(file,"Quit",kQuitApplication,'Q');bar->AddItem(file);
     auto* edit=new BMenu("Edit");add(edit,"Undo",B_UNDO,'Z');add(edit,"Redo",B_REDO,'Z',B_SHIFT_KEY);edit->AddSeparatorItem();add(edit,"Cut",B_CUT,'X');add(edit,"Copy",B_COPY,'C');add(edit,"Paste",B_PASTE,'V');add(edit,"Select All",B_SELECT_ALL,'A');edit->AddSeparatorItem();
-    add(edit,"Format with Prettier",kFormatPrettier);add(edit,"Complete Code",kComplete);add(edit,"Language Tools…",kShowLanguageTools);
+    add(edit,"Format with Prettier",kFormatPrettier);add(edit,"Complete Code",kComplete);add(edit,"Rename Symbol…",kRenameSymbol);add(edit,"Undo Last Project Edit…",kEditUndo);add(edit,"Language Tools…",kShowLanguageTools);
     edit->AddSeparatorItem();add(edit,"Preferences…",kShowPreferences,',');bar->AddItem(edit);
     auto* view=new BMenu("View");add(view,"Show / Hide Files",kToggleSidebar,'B');add(view,"Show / Hide Terminal",kToggleTerminal,'`');add(view,"Source Control",kToggleGit,'G',B_SHIFT_KEY);view->AddSeparatorItem();
     add(view,"Split Right",kSplitRight,'\\');add(view,"Split Down",kSplitDown,'\\',B_SHIFT_KEY);
@@ -274,11 +332,16 @@ void Workspace::FocusWorkspace() {
 }
 
 void Workspace::OpenProject(const std::string& input) {
+    if(fApplyingEdit) { Notice("Wait for the project edit to finish before changing projects.");return; }
     auto path=CanonicalPath(input);std::error_code error;
     if(!fs::is_directory(path,error)) { Notice("Cannot open that folder.");return; }
     if(!fRestoring) RememberRecent(path,true);
     bool changed=fProject!=path;
-    if(changed) ResetLanguages();
+    if(changed) {
+        ResetLanguages();++fEditSerial;++fRenameSerial;fJobs->Cancel("replace-preview");fJobs->Cancel("rename-snapshots");
+        for(auto& window:fSearchWindows) if(window.IsValid()) window.SendMessage(B_QUIT_REQUESTED);fSearchWindows.clear();
+        if(fEditWindow.IsValid() && !fApplyingEdit) fEditWindow.SendMessage(B_QUIT_REQUESTED);
+    }
     fProject=path;++fGeneration;fIndex=std::make_shared<ProjectIndex>();fGitRoot.clear();fExplorer->Clear();fGit->SetRepository("");
     SetTitle((fs::path(path).filename().string()+" — Kiri").c_str());
     Notice("Opening project…");auto generation=fGeneration;
@@ -312,6 +375,7 @@ void Workspace::RefreshIndex() {
     },"index refresh");
 }
 void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool activate,bool preview,int64 paneID,bool focusEditor) {
+    if(fApplyingEdit || EditPathBusy(input)) { Notice("Wait for the project edit to finish before opening this file.");return; }
     auto path=CanonicalPath(input);auto* pane=paneID?FindPane(paneID):fActivePane;if(!pane) return;paneID=pane->id;
     if(fRestoring && fRestoringDrafts) { if(std::find(fRestorePaths.begin(),fRestorePaths.end(),path)==fRestorePaths.end()) fRestorePaths.push_back(path);return; }
     preview=preview && fPreviewTabs;PromotePreviews();
@@ -408,6 +472,7 @@ void Workspace::Save(Document* d,bool saveAs) {
     SaveTo(d->id,d->path);
 }
 void Workspace::SaveTo(int64 id,const std::string& input) {
+    if(fApplyingEdit || EditPathBusy(input)) { Notice("Wait for the project edit to finish before saving.");return; }
     auto* d=ByID(id);if(!d || !d->editor || d->saving) return;
     std::string path=CanonicalPath(input);FileStamp expected=d->path==path?d->stamp:StatFile(path);
     for(const auto& other:fDocuments) if(other->id!=id && other->path==path) {
@@ -460,6 +525,8 @@ void Workspace::CancelQuit() {
     fQuitWhenSaved=false;fQuitDiscarded.clear();
 }
 bool Workspace::QuitRequested() {
+    if(fApplyingEdit) { fCancelEdit=true;Notice("Cancelling the remaining project edits. Close again when the current file finishes.");return false; }
+    for(const auto& d:fDocuments) if(!d->path.empty() && EditPathBusy(d->path)) { Notice("A project edit is using this window. Wait for it to finish before closing.");return false; }
     if(!fQuitWhenSaved) fQuitDiscarded.clear();
     fQuitWhenSaved=true;
     for(auto& d:fDocuments) {
@@ -508,12 +575,12 @@ void Workspace::ShowPreferences() {
     fPreferencesWindow=BMessenger(window);window->Show();
 }
 void Workspace::ShowFind() {
-    if(!fFindBar->IsHidden()) { fFindBar->Hide();if(Current() && Current()->editor) Current()->editor->MakeFocus();return; }
-    fFindBar->Show();fFindText->MakeFocus();fFindText->TextView()->SelectAll();
+    if(!fFindBar->IsHidden()) { fFindBar->Hide();for(auto& d:fDocuments) if(d->editor) d->editor->ClearSearchHighlights();if(Current() && Current()->editor) Current()->editor->MakeFocus();return; }
+    fFindBar->Show();RunFind(kFindChanged);fFindText->MakeFocus();fFindText->TextView()->SelectAll();
 }
 void Workspace::Search(bool search) {
     if(fProject.empty()) { Notice("Open a project folder first.");return; }
-    new SearchWindow(this,fProject,fIndex,search,Theme::Builtins()[fEditorSettings.theme],fPreviewTabs);
+    auto* window=new SearchWindow(this,fProject,fIndex,search,Theme::Builtins()[fEditorSettings.theme],fPreviewTabs);fSearchWindows.emplace_back(window);
 }
 void Workspace::PromptLine() { new PromptWindow(this,"Go to Line","Line or line:column",kGoToResult); }
 void Workspace::CopyPermalink() {
@@ -720,6 +787,7 @@ void Workspace::MessageReceived(BMessage* message) {
             if(auto* document=ByEditor(source)) {
                 if(message->what==kEditorText) {
                     UpdateTabs();
+                    if(!fFindBar->IsHidden()) { BMessage refresh(kFindRefresh);fFindTimer=std::make_unique<BMessageRunner>(BMessenger(this),&refresh,150000,1); }
                     if(fCompletionDocument==document->id) CancelCompletion();
                     document->languageDirty=true;document->textChangedAt=system_time();
                     if(document==Current()) UpdateSymbolBar();
@@ -730,7 +798,7 @@ void Workspace::MessageReceived(BMessage* message) {
             }
             break;
         }
-        case kEditorFocus:SyncFocus();break;
+        case kEditorFocus:SyncFocus();if(!fFindBar->IsHidden()) RunFind(kFindChanged);break;
         case kBrowseSymbols:fModeLayout->SetVisibleItem(int32(0));fSymbolBar->Browse();break;
         case kSymbolChosen: {
             int64 document=0,version=0;int32 symbol=-1;
@@ -762,6 +830,7 @@ void Workspace::MessageReceived(BMessage* message) {
             break;
         }
         case kOpenFile: {
+            const char* searchProject=nullptr;if(message->FindString("search_project",&searchProject)==B_OK && fProject!=searchProject) break;
             const char* path;
             if(message->FindString("path",&path)==B_OK) {
                 int64 line=1,column=1;message->FindInt64("line",&line);message->FindInt64("column",&column);bool preview=false;message->FindBool("preview",&preview);
@@ -835,6 +904,11 @@ void Workspace::MessageReceived(BMessage* message) {
             auto* focus=CurrentFocus();
             bool inEditor=false;for(BView* v=focus;v;v=v->Parent()) if(v==editor) inEditor=true;
             if(editor && inEditor) {
+                if(message->what==B_UNDO && d && EditPathBusy(d->path)) { Notice("Wait for the project edit to finish before Undo.");break; }
+                if(message->what==B_UNDO && fLastEdit && fLastEdit->rename && !fApplyingEdit) {
+                    bool renameUndo=false;for(const auto& file:fLastEdit->files) if(file.applied && !file.restored && file.before.path==d->path && editor->Matches(file.after)) renameUndo=true;
+                    if(renameUndo) { fEditPlan=fLastEdit;fRestoringEdit=true;ApplyProjectEdit(true);break; }
+                }
                 uint32 command=message->what==B_UNDO?SCI_UNDO:message->what==B_REDO?SCI_REDO:message->what==B_CUT?SCI_CUT:message->what==B_COPY?SCI_COPY:message->what==B_PASTE?SCI_PASTE:SCI_SELECTALL;
                 editor->SendMessage(command);
             } else if(focus) focus->MessageReceived(message);
@@ -869,12 +943,32 @@ void Workspace::MessageReceived(BMessage* message) {
         case kTerminalFocus:++fFocusSerial;break;
         case kRefresh:if(!fProject.empty()) { LoadDirectory(fProject);fGit->Refresh();RefreshIndex(); }break;
         case kFind:ShowFind();break;
-        case kFindNext:case kFindPrevious:
-            if(editor) { if(!editor->Find(fFindText->Text(),message->what==kFindPrevious,fMatchCase->Value()==B_CONTROL_ON)) Notice("No match found."); }break;
-        case kReplace:
-            if(editor && !editor->ReplaceOne(fFindText->Text(),fReplaceText->Text(),fMatchCase->Value()==B_CONTROL_ON)) Notice("No match found.");break;
-        case kReplaceAll:
-            if(editor) Notice("Replaced "+std::to_string(editor->ReplaceAll(fFindText->Text(),fReplaceText->Text(),fMatchCase->Value()==B_CONTROL_ON))+" matches.");break;
+        case kFindChanged:case kFindScope:case kFindRefresh:case kFindHistory:
+        case kFindNext:case kFindPrevious:case kReplace:case kReplaceAll:
+            if(message->what==kFindHistory) { const char* query=nullptr;if(message->FindString("query",&query)==B_OK) fFindText->SetText(query); }
+            RunFind(message->what);break;
+        case kProjectReplace:PreviewReplacement(*message);break;
+        case kRenameSymbol: {
+            void* source=nullptr;if(message->FindPointer("editor",&source)!=B_OK) source=editor;
+            RenameSymbol(ByEditor(source)?static_cast<Editor*>(source):nullptr);break;
+        }
+        case kRenameSubmit:SubmitRename(*message);break;
+        case kRenameDismiss: {
+            int64 serial=0;message->FindInt64("serial",&serial);
+            if(serial==fRenameSerial) { ++fRenameSerial;ClearRenameBorrowed(); }
+            break;
+        }
+        case kEditApply: {
+            if(!fApplyingEdit && fEditPlan) {
+                BMessage omit;for(int32 i=0;message->FindMessage("omit",i,&omit)==B_OK;++i) { int32 f=-1,m=-1;omit.FindInt32("file",&f);omit.FindInt32("match",&m);
+                    if(f>=0 && size_t(f)<fEditPlan->files.size() && m>=0 && size_t(m)<fEditPlan->files[f].edits.size() && !fEditPlan->rename) fEditPlan->files[f].edits[m].selected=false;
+                }
+                bool restore=false;message->FindBool("restore",&restore);ApplyProjectEdit(restore);
+            }break;
+        }
+        case kEditUndo:UndoProjectEdit();break;
+        case kEditCancel:fCancelEdit=true;break;
+        case kEditRefresh:if(!fApplyingEdit) { if(fEditPlan && fEditPlan->rename) RenameSymbol(editor);else PreviewReplacement(fReplaceRequest); }break;
         case kQuickOpen:Search(false);break;
         case kProjectSearch:Search(true);break;
         case kGoToLine:PromptLine();break;

@@ -9,6 +9,7 @@
 #include <OS.h>
 #include <SplitView.h>
 #include <TextControl.h>
+#include <StringView.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -16,6 +17,7 @@
 #include <cctype>
 #include <stdexcept>
 #include <signal.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace fs=std::filesystem;
@@ -29,7 +31,7 @@ static int LanguageFixture() {
         for(auto& message:framer.Feed(std::string_view(bytes,count))) {
             auto method=message.value("method",std::string());auto params=message.value("params",Json::object());Json result=nullptr;
             if(method=="exit") return 0;
-            if(method=="initialize") result={{"capabilities",{{"textDocumentSync",1},{"documentSymbolProvider",true},{"completionProvider",Json::object()}}}};
+            if(method=="initialize") result={{"capabilities",{{"textDocumentSync",1},{"documentSymbolProvider",true},{"completionProvider",Json::object()},{"renameProvider",{{"prepareProvider",true}}}}}};
             else if(method=="textDocument/didOpen") documents[params["textDocument"]["uri"]]=params["textDocument"]["text"];
             else if(method=="textDocument/didChange") documents[params["textDocument"]["uri"]]=params["contentChanges"][0]["text"];
             else if(method=="textDocument/didClose") documents.erase(params["textDocument"]["uri"]);
@@ -37,6 +39,17 @@ static int LanguageFixture() {
                 auto uri=params["textDocument"]["uri"].get<std::string>();auto text=documents.at(uri);
                 Json range={{"start",PositionJSON({0,0})},{"end",PositionJSON(PositionAt(text,text.size()))}};
                 result=Json::array({{{"name",fs::path(uri).filename().string()},{"kind",13},{"range",range},{"selectionRange",range}}});
+            } else if(method=="textDocument/prepareRename") {
+                auto text=documents.at(params["textDocument"]["uri"]);auto start=text.find("old");
+                if(start!=std::string::npos) result={{"range",{{"start",PositionJSON(PositionAt(text,start))},{"end",PositionJSON(PositionAt(text,start+3))}}},{"placeholder","old"}};
+            } else if(method=="textDocument/rename") {
+                auto file=PathFromURI(params["textDocument"]["uri"]);result={{"changes",Json::object()}};
+                for(auto path:{file,(fs::path(file).parent_path()/"closed.ts").string()}) {
+                    auto uri=FileURI(path);auto text=documents.count(uri)?documents[uri]:DiskSnapshot(path).text;
+                    SearchOptions options;options.query="old";options.wholeWord=true;auto matches=TextQuery(options).Find(text);
+                    auto edits=Json::array();for(auto& match:matches.matches) edits.push_back({{"range",{{"start",PositionJSON(PositionAt(text,match.start))},{"end",PositionJSON(PositionAt(text,match.end))}}},{"newText",params["newName"]}});
+                    result["changes"][uri]=edits;
+                }
             } else if(method=="textDocument/completion") {
                 snooze(120000);auto uri=params["textDocument"]["uri"].get<std::string>();
                 result=Json::array({{{"label","name"},{"insertText","name"},{"detail",fs::path(uri).filename().string()}}});
@@ -175,6 +188,62 @@ struct WorkspaceTestAccess {
         CHECK(!w->CurrentTab()->editor);detached=w->DetachTab(imageID,BPoint(210,210));CHECK(detached && detached->Lock());
         CHECK(detached->CurrentTab()->view==imageView && !detached->CurrentTab()->editor);CHECK(detached->QuitRequested());detached->Quit();
         CHECK(w->QuitRequested());w->Quit();
+    }
+    static void SearchAndEdits(const std::string& base,const std::string& executable) {
+        auto root=base+"/edit-project",settings=base+"/edit-settings";fs::create_directories(root);
+        auto a=root+"/open.ts",b=root+"/closed.ts";
+        { std::ofstream(a)<<"const old = '😀';\r\nold;\r\n";std::ofstream(b)<<"old; old;\r\n"; }
+        auto* w=new Workspace(settings,false);w->Show();CHECK(w->Lock());w->OpenProject(root);Open(*w,a);
+        auto* editor=w->Current()->editor;editor->SendMessage(SCI_APPENDTEXT,10,reinterpret_cast<sptr_t>("// dirty\r\n"));
+        Wait(*w,[&]{return w->fIndex->paths.size()==2;});auto original=editor->Text();
+        BMessage request(kProjectReplace);request.AddString("root",root.c_str());request.AddString("query","old");request.AddString("replacement","new");request.AddBool("case",true);
+        auto preview=[&] { auto previous=w->fEditPlan;w->PreviewReplacement(request);Wait(*w,[&]{return w->fEditPlan && w->fEditPlan!=previous;});CHECK(w->fEditPlan->files.size()==2); };
+        preview();CHECK(w->fEditPlan->files[0].before.path==b);CHECK(w->fEditPlan->files[1].before.text==original);
+        auto inputRevision=editor->InputRevision();SCNotification delayed{};delayed.nmhdr.code=SCN_MODIFIED;delayed.modificationType=SC_MOD_INSERTTEXT;editor->NotificationReceived(&delayed);CHECK(editor->InputRevision()==inputRevision);
+        w->fEditPlan->files[0].edits[1].selected=false;w->ApplyProjectEdit();CHECK(w->fApplyingEdit);Wait(*w,[&]{return !w->fApplyingEdit;});
+        CHECK(ReadFile(b).bytes=="new; old;\r\n");CHECK(editor->Text()=="const new = '😀';\r\nnew;\r\n// dirty\r\n");CHECK(editor->Dirty());CHECK(ReadFile(a).bytes=="const old = '😀';\r\nold;\r\n");
+        CHECK(w->fLastEdit->files[0].applied);CHECK(w->fLastEdit->files[1].applied);CHECK(StatFile(w->fLastEdit->journal).exists);
+        editor->SendMessage(SCI_UNDO);CHECK(editor->Text()==original);
+        w->UndoProjectEdit();w->ApplyProjectEdit(true);Wait(*w,[&]{return !w->fApplyingEdit;});CHECK(ReadFile(b).bytes=="old; old;\r\n");CHECK(editor->Text()==original);
+        preview();editor->SendMessage(SCI_APPENDTEXT,1,reinterpret_cast<sptr_t>("x"));w->ApplyProjectEdit();CHECK(!w->fApplyingEdit);CHECK(ReadFile(b).bytes=="old; old;\r\n");CHECK(editor->Text()==original+"x");
+        editor->SendMessage(SCI_UNDO);preview();{ std::ofstream(b)<<"external\n"; }w->ApplyProjectEdit();Wait(*w,[&]{return !w->fApplyingEdit;});CHECK(editor->Text()==original);CHECK(ReadFile(b).bytes=="external\n");
+        { std::ofstream(b)<<"old; old;\r\n"; }preview();w->ApplyProjectEdit();w->fCancelEdit=true;Wait(*w,[&]{return !w->fApplyingEdit;});CHECK(editor->Text()==original);CHECK(ReadFile(b).bytes=="old; old;\r\n");
+        // A failed later disk write preserves the completed file and its restore path.
+        auto c=root+"/z-readonly.ts";{std::ofstream(c)<<"old;\n";}chmod(c.c_str(),0444);
+        ProjectSearchOptions replaceOptions;replaceOptions.query="old";replaceOptions.matchCase=true;replaceOptions.wholeWord=true;auto index=IndexProject(root);auto plan=std::make_shared<EditPlan>(ReplacementPlan(root,index,replaceOptions,"new",w->OpenSnapshots()));
+        w->ShowEditPreview(plan);w->ApplyProjectEdit();Wait(*w,[&]{return !w->fApplyingEdit;});CHECK(ReadFile(b).bytes=="new; new;\r\n");CHECK(!plan->files.back().error.empty());CHECK(!plan->files.back().applied);
+        w->UndoProjectEdit();w->ApplyProjectEdit(true);Wait(*w,[&]{return !w->fApplyingEdit;});CHECK(ReadFile(b).bytes=="old; old;\r\n");CHECK(editor->Text()==original);chmod(c.c_str(),0644);fs::remove(c);
+        // Real Workspace -> LSP -> native prompt -> edit preview -> whole-operation Undo.
+        w->fLanguageTools.ForFile(a);for(auto& profile:w->fLanguageTools.profiles) if(profile.language=="typescript") profile.command="'"+executable+"' --language-fixture";
+        w->ResetLanguages();auto* server=w->EnsureLanguage(*w->Current());CHECK(server);Wait(*w,[&]{return server->Ready();});w->SyncLanguage(*w->Current(),*server);
+        editor->SendMessage(SCI_GOTOPOS,6);w->RenameSymbol(editor);Wait(*w,[&]{return w->fRenameWindow.IsValid();});
+        auto beforePlan=w->fEditPlan;BMessage rename(kRenameSubmit);rename.AddInt64("serial",w->fRenameSerial);rename.AddString("name","renamed");w->SubmitRename(rename);
+        Wait(*w,[&]{return w->fEditPlan!=beforePlan;});CHECK(w->fEditPlan->rename);CHECK(w->fEditPlan->files.size()==2);
+        w->ApplyProjectEdit();Wait(*w,[&]{return !w->fApplyingEdit;});CHECK(editor->Text().find("const renamed")!=std::string::npos);CHECK(ReadFile(b).bytes=="renamed; renamed;\r\n");
+        editor->MakeFocus();Send(*w,B_UNDO);Wait(*w,[&]{return !w->fApplyingEdit;});CHECK(editor->Text()==original);CHECK(ReadFile(b).bytes=="old; old;\r\n");
+        auto* other=new Workspace(base+"/other-edit-settings",false);other->Show();CHECK(other->Lock());Open(*other,b);
+        other->Current()->editor->SendMessage(SCI_APPENDTEXT,9,reinterpret_cast<sptr_t>("// dirty\n"));auto otherOriginal=other->Current()->editor->Text();other->Unlock();
+        Wait(*w,[&]{return true;});preview();CHECK(w->fEditPlan->files[0].before.open);w->ApplyProjectEdit();Wait(*w,[&]{return !w->fApplyingEdit;});
+        CHECK(other->Lock());CHECK(other->Current()->editor->Text()=="new; new;\r\n// dirty\n");CHECK(other->Current()->editor->Dirty());other->Unlock();CHECK(ReadFile(b).bytes=="old; old;\r\n");
+        w->UndoProjectEdit();w->ApplyProjectEdit(true);Wait(*w,[&]{return !w->fApplyingEdit;});CHECK(other->Lock());CHECK(other->Current()->editor->Text()==otherOriginal);other->Unlock();
+        editor->SendMessage(SCI_GOTOPOS,6);w->RenameSymbol(editor);Wait(*w,[&]{return w->fRenameWindow.IsValid();});
+        beforePlan=w->fEditPlan;BMessage crossRename(kRenameSubmit);crossRename.AddInt64("serial",w->fRenameSerial);crossRename.AddString("name","everywhere");w->SubmitRename(crossRename);
+        Wait(*w,[&]{return w->fEditPlan!=beforePlan;});w->ApplyProjectEdit();Wait(*w,[&]{return !w->fApplyingEdit;});
+        CHECK(other->Lock());CHECK(other->Current()->editor->Text()=="everywhere; everywhere;\r\n// dirty\n");CHECK(ReadFile(b).bytes=="old; old;\r\n");
+        other->Current()->editor->MakeFocus();w->Unlock();Send(*other,B_UNDO);Wait(*other,[&]{return !other->fApplyingEdit;});CHECK(other->Current()->editor->Text()==otherOriginal);other->Quit();CHECK(w->Lock());CHECK(editor->Text()==original);
+        // Query generations and project changes cannot revive stale disk results.
+        for(int i=0;i<23;++i) { w->fFindText->SetText(("recent "+std::to_string(i)).c_str());w->RememberQuery(); }
+        CHECK(w->fRecentQueries.size()==20);CHECK(Json::parse(ReadFile(settings+"/search-history.json").bytes).size()==20);
+        w->Search(true);auto search=w->fSearchWindows.back();
+        auto inspectSearch=[&](const std::function<bool(BWindow&)>& action) {
+            if(search.LockTargetWithTimeout(100000)!=B_OK) return false;
+            BLooper* looper=nullptr;search.Target(&looper);auto* window=dynamic_cast<BWindow*>(looper);bool result=window && action(*window);looper->Unlock();return result;
+        };
+        CHECK(inspectSearch([](BWindow& search) { auto* query=dynamic_cast<BTextControl*>(search.FindView("query"));if(!query) return false;query->SetText("obsolete query");query->SetText("old");search.PostMessage(kQueryChanged);return true; }));
+        Wait(*w,[&]{return inspectSearch([](BWindow& search) { auto* status=dynamic_cast<BStringView*>(search.FindView("search status"));return status && std::string(status->Text()).find("Disk only · 4 matches")!=std::string::npos; });});
+        auto nextRoot=base+"/next-project";fs::create_directory(nextRoot);w->OpenProject(nextRoot);Wait(*w,[&]{return !search.IsValid();});
+        auto documents=w->fDocuments.size();BMessage stale(kOpenFile);stale.AddString("path",b.c_str());stale.AddString("search_project",root.c_str());w->MessageReceived(&stale);CHECK(w->fDocuments.size()==documents);
+        w->Quit();
     }
     static void Run(const std::string& root,const std::string& executable) {
         auto settings=root+"/settings",a=root+"/one.txt",b=root+"/two.txt",c=root+"/three.txt",e=root+"/four.txt";
@@ -328,6 +397,6 @@ int main(int argc,char** argv) {
     }
     BApplication application("application/x-vnd.Kiri-workspace-unit-tests");
     char folder[]="/tmp/kiri-workspace-XXXXXX";auto* root=mkdtemp(folder);if(!root) return 1;
-    try { kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
+    try { kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<" (test files: "<<root<<")\n";return 1; }
 }

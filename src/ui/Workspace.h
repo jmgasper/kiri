@@ -7,6 +7,7 @@
 #include "ui/EditorSettings.h"
 #include "core/LanguageTools.h"
 #include "core/LanguageServer.h"
+#include "core/EditTransaction.h"
 #include <Window.h>
 #include <memory>
 #include <set>
@@ -15,7 +16,7 @@
 #include <vector>
 class BFilePanel;class BCardLayout;class BSplitView;class BStringView;
 class BTextControl;class BCheckBox;class BMessageRunner;
-class BMenuBar;
+class BMenuBar;class BMenuField;
 namespace kiri {
 class Editor;struct EditorState;class Explorer;class GitView;class TerminalPanel;class TabStrip;class RefreshButton;class SymbolBar;
 class Workspace:public BWindow {
@@ -109,7 +110,26 @@ private:
     void ApplyTheme(int index);
     void ShowPreferences();
     void ShowFind();
+    SearchOptions FindOptions() const;
+    void RunFind(uint32 command);
+    void RememberQuery();
     void Search(bool projectSearch);
+    SnapshotMap OpenSnapshots();
+    EditSnapshot CurrentSnapshot(const EditSnapshot& before);
+    EditSnapshot BufferSnapshot(Document& document);
+    bool VisitOpenDocument(const std::string& path,const std::function<void(Workspace&,Document&)>& action);
+    std::string ApplyBufferEdit(FileEdit& file,bool restore);
+    void RegisterEditWorkspace(bool add);
+    bool ReserveEditPaths(bool reserve);
+    bool EditPathBusy(const std::string& path) const;
+    void PreviewReplacement(const BMessage& message);
+    void ShowEditPreview(std::shared_ptr<EditPlan> plan,bool restore=false);
+    void ApplyProjectEdit(bool restore=false);
+    void ProjectEditStep();
+    void UndoProjectEdit();
+    void RenameSymbol(Editor* source);
+    void SubmitRename(const BMessage& message);
+    void ClearRenameBorrowed();
     void PromptLine();
     void CopyPermalink();
     void LoadDirectory(const std::string& path);
@@ -205,5 +225,24 @@ private:
     BTextControl* fFindText;
     BTextControl* fReplaceText;
     BCheckBox* fMatchCase;
+    BCheckBox *fRegex,*fWholeWord,*fInSelection;
+    BStringView* fFindStatus;
+    BMenuField* fFindHistory;
+    std::deque<std::string> fRecentQueries;
+    std::unique_ptr<BMessageRunner> fFindTimer;
+    int64 fFindScopeView=0;
+    std::vector<BMessenger> fSearchWindows;
+    BMessenger fEditWindow,fRenameWindow;
+    std::shared_ptr<EditPlan> fEditPlan,fLastEdit;
+    BMessage fReplaceRequest;
+    size_t fEditFile=0;
+    bool fApplyingEdit=false,fRestoringEdit=false,fCancelEdit=false;
+    int64 fEditSerial=0,fRenameSerial=0,fRenameDocument=0;
+    size_t fRenameCaret=0;
+    std::string fRenameText;
+    SnapshotMap fRenameOpen;
+    std::map<std::string,FileStamp> fRenameStamps;
+    std::string fRenameServerKey;
+    std::vector<std::string> fRenameBorrowed;
 };
 }
