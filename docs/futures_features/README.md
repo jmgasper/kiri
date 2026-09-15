@@ -3,11 +3,11 @@
 Researched **2026-09-14** against Kiri **0.0.1 alpha**, source commit
 `5ab4ba5517cf04f9de8ab05aad596f9cb9933215`.
 
-This catalog contains **39 draft proposals and 11 completed features** based on features found in CodeEdit,
+This catalog contains **36 draft proposals and 14 completed features** based on features found in CodeEdit,
 CotEditor and JetBrains Fleet. Each file describes the reference behavior,
 Kiri's current support, a candidate scope, acceptance checks, dependencies and
 decisions to make before handing it to Codex as an implementation goal. Completed
-features 01, 04, 05, 06, 08, 20, 25, 26, 29, 31 and 40 are archived in [the done folder](../future_features/done/);
+features 01, 04, 05, 06, 08, 09, 20, 21, 22, 25, 26, 29, 31 and 40 are archived in [the done folder](../future_features/done/);
 their acceptance checks record implementation verification.
 
 The scopes, priorities and sizes are suggestions for the owner to edit. The
@@ -39,9 +39,9 @@ and qualifications appear in each feature file.
 
 ## Suggested review order
 
-- **Soon:** everyday workflow gaps and useful foundations; 10 proposals.
-- **Next:** useful additions after the relevant foundations; 17 proposals.
-- **Later:** optional polish or more specialized workflows; 8 proposals.
+- **Soon:** everyday workflow gaps and useful foundations; 9 proposals.
+- **Next:** useful additions after the relevant foundations; 16 proposals.
+- **Later:** optional polish or more specialized workflows; 7 proposals.
 - **Research:** resolve Haiku/tooling/architecture feasibility first; 4 proposals.
 
 Sizes indicate implementation breadth, not time estimates: **S** is a contained
@@ -50,7 +50,7 @@ model or substantial coordination, and **XL** needs architectural research.
 IDs are stable references, not an implementation sequence.
 
 A useful first review set is [comment toggling](10-toggle-comments.md),
-[indentation settings](09-editorconfig-indentation.md),
+[indentation settings](../future_features/done/09-editorconfig-indentation.md),
 [external refresh](../future_features/done/08-external-file-refresh.md),
 [diagnostics](../future_features/done/26-diagnostics.md), [code navigation](27-code-navigation.md) and
 [saved tasks](33-task-runner.md). Implemented [splits](../future_features/done/01-split-editors.md)
@@ -65,7 +65,7 @@ remain a larger candidate.
 | 02 | [Searchable command palette](02-command-palette.md) | F | Missing | Soon / M |
 | 03 | [Custom keyboard shortcuts](03-custom-keybindings.md) | F | Missing | Soon / M |
 | 20 | [Custom themes and import/export](../future_features/done/20-custom-themes.md) | CE, CO | Done | Implemented / M |
-| 21 | [Document minimap](21-minimap.md) | CE | Missing | Later / M |
+| 21 | [Document minimap](../future_features/done/21-minimap.md) | CE | Done | Implemented / M |
 | 23 | [Distraction-free mode](23-focus-mode.md) | CE | Partial | Later / S |
 | 24 | [Navigation history and breadcrumbs](24-navigation-history.md) | CE | Partial | Next / M |
 | 25 | [Preview tabs and reopen closed tabs](../future_features/done/25-tab-workflows.md) | CE, F | Done | Implemented / M |
@@ -86,7 +86,7 @@ remain a larger candidate.
 
 | ID | Proposal | Evidence | Kiri gap | Priority / size |
 | --- | --- | --- | --- | --- |
-| 09 | [Indentation settings and EditorConfig](09-editorconfig-indentation.md) | CO, F | Partial | Soon / M |
+| 09 | [Indentation settings and EditorConfig](../future_features/done/09-editorconfig-indentation.md) | CO, F | Done | Implemented / M |
 | 10 | [Language-aware comment toggling](10-toggle-comments.md) | CO, F | Missing | Soon / S |
 | 11 | [Automatic bracket and quote pairs](11-paired-delimiters.md) | CE, CO | Partial | Next / M |
 | 12 | [Editable legacy encodings and conversion](12-text-encodings.md) | CO | Partial | Soon / L |
@@ -96,7 +96,7 @@ remain a larger candidate.
 | 17 | [Snippets and completion placeholders](17-snippets.md) | CO, F | Partial | Next / L |
 | 18 | [Syntax profiles and server-free outlines](18-custom-syntax-profiles.md) | CO | Partial | Next / L |
 | 19 | [Document/selection information inspector](19-document-statistics.md) | CO | Partial | Later / M |
-| 22 | [Column guides](22-column-guides.md) | CE | Missing | Next / S |
+| 22 | [Column guides](../future_features/done/22-column-guides.md) | CE | Done | Implemented / S |
 
 ## Language tools
 

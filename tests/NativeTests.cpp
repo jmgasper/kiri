@@ -128,6 +128,31 @@ static void LanguageEdits(Editor* editor) {
     BMessage complete(B_KEY_DOWN);complete.AddInt32("modifiers",B_CONTROL_KEY);complete.AddInt32("raw_char",32);complete.AddString("bytes","");
     CHECK(editor->FilterLanguageKey(&complete));CHECK(editor->Text().empty());
 }
+static void IndentationAndGuides(Editor* editor) {
+    EditorSettings settings;settings.indentation={false,2,2};settings.guideColumns={80,100};settings.Normalize();
+    BMessage stored;settings.WriteTo(stored);EditorSettings restored;restored.ReadFrom(stored);CHECK(restored==settings);
+    editor->State()->config={};editor->State()->overrides={};editor->SetText("value\n");editor->ApplySettings(settings);
+    CHECK(editor->SendMessage(SCI_GETUSETABS)==0 && editor->SendMessage(SCI_GETTABWIDTH)==2 && editor->SendMessage(SCI_GETINDENT)==2);
+    CHECK(editor->SendMessage(SCI_GETEDGEMODE)==EDGE_MULTILINE);CHECK(editor->SendMessage(SCI_GETMULTIEDGECOLUMN,0)==80);CHECK(editor->SendMessage(SCI_GETMULTIEDGECOLUMN,1)==100);
+    editor->SendMessage(SCI_SETSEL,0,0);editor->SendMessage(SCI_TAB);CHECK(editor->Text()=="  value\n");editor->SendMessage(SCI_BACKTAB);CHECK(editor->Text()=="value\n");
+    editor->SetText("  value");editor->SendMessage(SCI_SETSEL,7,7);editor->InsertNewline();CHECK(editor->Text()=="  value\n  ");CHECK(editor->SendMessage(SCI_GETCURRENTPOS)==10);
+    editor->SendMessage(SCI_UNDO);CHECK(editor->Text()=="  value" && !editor->Dirty());editor->SendMessage(SCI_REDO);CHECK(editor->Text()=="  value\n  ");
+    editor->SetText("  ");editor->SendMessage(SCI_SETSEL,2,2);editor->PasteText("    one\n      two\n    three");CHECK(editor->Text()=="  one\n    two\n  three");editor->SendMessage(SCI_UNDO);CHECK(editor->Text()=="  " && !editor->Dirty());
+    settings.indentation={true,3,4};editor->ApplySettings(settings);editor->SetText("value");editor->SendMessage(SCI_SETSEL,0,0);editor->SendMessage(SCI_TAB);CHECK(editor->Text()=="\t value");
+    editor->SendMessage(SCI_SETSEL,7,7);editor->InsertNewline();CHECK(editor->Text()=="\t value\n\t ");
+    editor->SetText("\t");editor->SendMessage(SCI_SETSEL,1,1);editor->PasteText("one\n   two");CHECK(editor->Text()=="\tone\n\t\ttwo");editor->SendMessage(SCI_UNDO);CHECK(editor->Text()=="\t" && !editor->Dirty());
+    // Multiple carets receive their own indentation in a single undo group.
+    settings.indentation={false,2,2};editor->ApplySettings(settings);editor->SetText("  one\n    two");editor->SendMessage(SCI_SETSEL,5,5);editor->SendMessage(SCI_ADDSELECTION,13,13);editor->InsertNewline();
+    CHECK(editor->Text()=="  one\n  \n    two\n    ");CHECK(editor->SendMessage(SCI_GETSELECTIONS)==2);editor->SendMessage(SCI_UNDO);CHECK(editor->Text()=="  one\n    two" && !editor->Dirty());
+    editor->SetText("  one",false,SC_EOL_CRLF);editor->SendMessage(SCI_SETSEL,5,5);editor->InsertNewline();CHECK(editor->Text()=="  one\r\n  ");editor->SendMessage(SCI_UNDO);CHECK(editor->Text()=="  one");
+    editor->SetText("unchanged");editor->SendMessage(SCI_APPENDTEXT,1,reinterpret_cast<sptr_t>("!"));editor->SendMessage(SCI_SETSEL,2,6);auto before=editor->Text();auto revision=editor->InputRevision();
+    std::set<std::string> families;for(auto* font:{be_plain_font,be_fixed_font}) {font_family family;font->GetFamilyAndStyle(&family,nullptr);families.insert(family);}for(int32 i=0;i<count_font_families() && families.size()<3;++i) {font_family family;if(get_font_family(i,&family)==B_OK) families.insert(family);}CHECK(families.size()==3);
+    for(const auto& family:families) for(int size:{10,18,26}) {settings.fontFamily=family;settings.fontSize=size;settings.indentation={true,8,8};settings.guideColumns={72,120};editor->ApplySettings(settings);for(int zoom:{-2,0,3}) {editor->SendMessage(SCI_SETZOOM,zoom);CHECK(editor->SendMessage(SCI_GETMULTIEDGECOLUMN,1)==120);CHECK(editor->Text()==before && editor->InputRevision()==revision && editor->Dirty());CHECK(editor->SendMessage(SCI_GETANCHOR)==2 && editor->SendMessage(SCI_GETCURRENTPOS)==6);}}
+    editor->State()->overrides.indentation=Indentation{false,3,3};editor->State()->overrides.guides=std::vector<int>{};editor->ApplyDocumentStyle();CHECK(editor->SendMessage(SCI_GETINDENT)==3 && editor->SendMessage(SCI_GETEDGEMODE)==EDGE_NONE);
+    BMessage document;WriteDocumentOverrides(document,editor->State()->overrides);auto overrides=ReadDocumentOverrides(document);CHECK(overrides.indentation==editor->State()->overrides.indentation && overrides.guides==editor->State()->overrides.guides);
+    editor->SendMessage(SCI_UNDO);CHECK(editor->Text()=="unchanged" && !editor->Dirty());
+    editor->State()->overrides={};editor->ApplySettings(EditorSettings());editor->SendMessage(SCI_SETZOOM,0);editor->SetText("");
+}
 static void Fixtures(const std::string& root) {
     if(fs::exists(root)) throw std::runtime_error("Fixture directory must be new.");
     fs::create_directories(root);
@@ -207,7 +232,7 @@ int main(int argc,char** argv) {
         editor->SetText("{\"key\": true, \"n\": 42}\n");editor->SetLanguage("test.json");editor->SendMessage(SCI_COLOURISE,0,-1);
         CHECK(editor->SendMessage(SCI_GETSTYLEAT,3)==SCE_JSON_PROPERTYNAME);CHECK(editor->SendMessage(SCI_GETSTYLEAT,8)==SCE_JSON_KEYWORD);
         editor->MarkRecovered();CHECK(editor->Dirty());editor->MarkSaved();CHECK(!editor->Dirty());
-        Preferences(editor);Icons();Recents();LanguageEdits(editor);AdvancedSearch(editor);
+        Preferences(editor);Icons();Recents();LanguageEdits(editor);AdvancedSearch(editor);IndentationAndGuides(editor);
         auto loader=editor->CreateLoader(true);CHECK(loader->loader);
         std::thread loading([&]{CHECK(loader->loader->AddData("first\r\nsecond\r\n",15)==SC_STATUS_OK);});loading.join();editor->Adopt(*loader,0);
         CHECK(editor->Text()=="first\r\nsecond\r\n");CHECK(editor->SendMessage(SCI_GETLINECOUNT)==3);CHECK(!editor->Dirty());CHECK(editor->SendMessage(SCI_GETDOCUMENTOPTIONS)&SC_DOCUMENTOPTION_STYLES_NONE);

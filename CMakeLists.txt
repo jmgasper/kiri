@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 add_library(kiri_core
+    src/core/DocumentSettings.cpp src/core/EditorConfig.cpp
     src/core/ColorTheme.cpp src/core/LanguageAnalysis.cpp
     src/core/Process.cpp src/core/Git.cpp src/core/GitDiff.cpp src/core/Diff.cpp src/core/FileIO.cpp
     src/core/Search.cpp src/core/EditTransaction.cpp src/core/Project.cpp src/core/ProjectMonitor.cpp src/core/Terminal.cpp src/core/Recovery.cpp
@@ -24,6 +25,9 @@ target_link_libraries(kiri_core PUBLIC kiri_vterm)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(kiri_document_settings_tests tests/DocumentSettingsTests.cpp)
+    target_link_libraries(kiri_document_settings_tests PRIVATE kiri_core)
+    add_test(NAME kiri_document_settings COMMAND kiri_document_settings_tests)
     add_executable(kiri_analysis_theme_tests tests/AnalysisThemeTests.cpp)
     target_link_libraries(kiri_analysis_theme_tests PRIVATE kiri_core)
     add_test(NAME kiri_analysis_theme COMMAND kiri_analysis_theme_tests)
@@ -46,7 +50,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
     find_path(LEXILLA_INCLUDE_DIR SciLexer.h PATH_SUFFIXES lexilla REQUIRED)
     find_library(SCINTILLA_LIBRARY scintilla REQUIRED)
     find_library(LEXILLA_LIBRARY lexilla REQUIRED)
-    set(KIRI_UI_SOURCES src/ui/Workspace.cpp src/ui/Editor.cpp src/ui/EditorAnalysis.cpp
+    set(KIRI_UI_SOURCES src/ui/Workspace.cpp src/ui/Editor.cpp src/ui/EditorAnalysis.cpp src/ui/EditorIndentation.cpp
+        src/ui/WorkspaceSettings.cpp src/ui/DocumentSettingsWindow.cpp src/ui/MinimapView.cpp
         src/ui/Theme.cpp src/ui/Explorer.cpp src/ui/TerminalView.cpp
         src/ui/PreviewView.cpp src/ui/GitView.cpp src/ui/DiffView.cpp src/ui/TabStrip.cpp
         src/ui/TerminalPanel.cpp src/ui/RefreshButton.cpp
@@ -59,7 +64,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
     target_link_libraries(Kiri PRIVATE kiri_core ${SCINTILLA_LIBRARY} ${LEXILLA_LIBRARY}
         be tracker translation)
     if(BUILD_TESTING)
-        add_executable(kiri_native_tests tests/NativeTests.cpp src/ui/Editor.cpp src/ui/EditorAnalysis.cpp src/ui/Theme.cpp src/ui/EditorSettings.cpp src/ui/FileIcons.cpp src/ui/RecentItems.cpp)
+        add_executable(kiri_native_tests tests/NativeTests.cpp src/ui/Editor.cpp src/ui/EditorAnalysis.cpp src/ui/EditorIndentation.cpp src/ui/MinimapView.cpp src/ui/Theme.cpp src/ui/EditorSettings.cpp src/ui/FileIcons.cpp src/ui/RecentItems.cpp)
         target_include_directories(kiri_native_tests PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
         target_link_libraries(kiri_native_tests PRIVATE kiri_core ${SCINTILLA_LIBRARY} ${LEXILLA_LIBRARY} be)
         add_test(NAME kiri_native COMMAND kiri_native_tests)

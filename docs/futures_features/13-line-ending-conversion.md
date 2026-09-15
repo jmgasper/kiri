@@ -30,4 +30,4 @@ command and a way to jump to inconsistent endings.
 
 ## Dependencies and review decisions
 
-Integrate with [EditorConfig](09-editorconfig-indentation.md). Decide whether opening a mixed file shows a passive status indicator or a prompt; preservation remains the default until conversion is requested.
+Integrate with [EditorConfig](../future_features/done/09-editorconfig-indentation.md). Decide whether opening a mixed file shows a passive status indicator or a prompt; preservation remains the default until conversion is requested.

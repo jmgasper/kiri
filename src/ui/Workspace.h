@@ -42,6 +42,8 @@ private:
         // Non-owning representative view above; tabs own view lifetimes. Buffer
         // metadata, disk state, recovery and language-server state are per file.
         std::shared_ptr<EditorState> buffer;
+        int64 configSerial=0;bool configPending=false;
+        BMessenger settingsWindow;
         int64 closeView=0;
         FileStamp stamp;
         bool bom=false,saving=false,closeAfterSave=false,external=false;
@@ -123,6 +125,10 @@ private:
     void CancelQuit();
     void ApplyTheme(int index=-1);
     void ShowPreferences();
+    void ShowDocumentSettings();
+    void RefreshDocumentConfig(Document& document,bool force=false);
+    void ApplyDocumentSettings(BMessage& message);
+    void UpdateDocumentStyle(Document& document);
     void ShowFind();
     SearchOptions FindOptions() const;
     void RunFind(uint32 command);

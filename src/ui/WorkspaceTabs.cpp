@@ -74,6 +74,7 @@ Workspace* Workspace::DetachTab(int64 id,BPoint screenPoint) {
             copy->SetText(text,tab->editor->SendMessage(SCI_GETREADONLY),tab->editor->SendMessage(SCI_GETEOLMODE));
             if(!copy->Matches(text)) { Notice("Not enough memory to move this tab to a new window.");return nullptr; }
             if(tab->editor->Dirty()) copy->MarkRecovered();
+            copy->State()->config=tab->editor->State()->config;copy->State()->overrides=tab->editor->State()->overrides;
         }
     }
     auto directory=fSettings+"/windows/"+fSessionToken+"-"+std::to_string(system_time());
@@ -87,6 +88,8 @@ Workspace* Workspace::DetachTab(int64 id,BPoint screenPoint) {
     CancelCompletion();
     if(document->formatView==id) { ++document->formatSerial;fJobs->Cancel("format-"+std::to_string(document->id)); }
     if(last) {
+        if(document->settingsWindow.IsValid()) document->settingsWindow.SendMessage(B_QUIT_REQUESTED);document->settingsWindow=BMessenger();
+        fJobs->Cancel("document-config-"+std::to_string(document->id));++document->configSerial;document->configPending=false;
         CloseLanguage(*document);
         if(fSnapshot && fSnapshot->id==document->id) { fSnapshot.reset();fRecoveryTimer.reset(); }
         if(!tab->editor || !tab->editor->Dirty()) { ClearRecovery(*document);document->recoveryFile.clear(); }

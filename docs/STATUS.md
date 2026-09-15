@@ -1,5 +1,46 @@
 # Verification record
 
+## EditorConfig, minimaps and column guides — develop
+
+Verified September 15, 2026 on Linux and Haiku R1/beta5 in the existing QEMU VM.
+All six CMake/CTest suites passed. Haiku passed 166 core checks, 94 search/edit
+checks, 3,675 refresh/diff checks, 82 analysis/theme checks, 83 document-settings
+checks, 373 native editor/worker checks and 930 workspace checks. Real Prettier,
+TypeScript and clangd runs passed 125 language checks and 96 additional native
+analysis checks. An independent run of the official EditorConfig glob corpus
+passed 130 cases; this does not claim full core/plugin conformance.
+
+Indentation checks cover defaults, nested configurations, root boundaries,
+`unset`, malformed values, property origins, tabs alongside spaces, newline
+undo, multiline paste, shared panes, disk refresh, Save As and persistence.
+Preferences tests exercise invalid input, preview, Cancel, Apply and restart
+without changing document bytes, selections, dirty state or undo history.
+A regression caught a reopened split restoring old document settings over newer
+choices in the other pane; reopening now retains the still-open buffer's settings.
+
+Guide rendering checks span three installed font families, three sizes and three
+zoom levels. Live inspection confirms multiple guides in light and dark themes.
+Real keyboard input verifies JavaScript spaces, Makefile tabs, Tab/Shift+Tab,
+newline auto-indent and undo. The settings dialogs and Preferences controls fit
+the VM's 1280 × 800 display.
+
+Minimap checks cover click/drag navigation, folds, wrapping, zoom, edits, cache
+bounds and width recovery. A live mouse check exposed a native scroll-view layout
+loop; the editor now owns its target/scrollbar/minimap layout and paints normally.
+Live navigation reaches distant lines while leaving the caret and selection
+unchanged. Small, 8 MiB and 200 MiB measurements are recorded in
+[native measurements](PERFORMANCE.md#minimap); the 200 MiB overview visibly pauses
+and releases its cell cache while editing continues.
+
+The project-search focus fix also passes real mouse input in this build: clicking
+Replace, typing replacement text and dragging to highlight it leave the panel
+open with 400 results visible.
+
+See [editor options](EDITOR_OPTIONS.md) and completed requirements
+[09](future_features/done/09-editorconfig-indentation.md),
+[21](future_features/done/21-minimap.md) and
+[22](future_features/done/22-column-guides.md) for behavior and limits.
+
 ## Diagnostics, semantic highlighting and custom themes — develop
 
 Verified September 15, 2026 on Linux and Haiku R1/beta5 in the existing QEMU VM.

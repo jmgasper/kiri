@@ -9,6 +9,7 @@
 #include <ILoader.h>
 #include <memory>
 namespace kiri {
+class MinimapView;
 // Scintilla owns the text and undo stack through each attached view's document
 // reference. This state follows that same buffer, including synchronous input
 // revisions (Haiku delivers Scintilla's notifications asynchronously).
@@ -16,6 +17,8 @@ struct EditorState {
     int64 revision=0,inputRevision=0,changes=0;bool recovered=false;
     std::vector<Diagnostic> diagnostics;
     std::vector<SemanticToken> semanticTokens;
+    DocumentConfig config;
+    DocumentOverrides overrides;
 };
 struct EditorLoader {
     Scintilla::ILoader* loader=nullptr;
@@ -26,11 +29,19 @@ class Editor : public BScintillaView {
 public:
     Editor();
     void AllAttached() override;
+    void FrameResized(float width,float height) override;
+    void DoLayout() override;
+    MinimapView* Minimap() const {return fMinimap;}
     sptr_t SendMessage(unsigned int message,uptr_t wParam=0,sptr_t lParam=0);
     void NotificationReceived(SCNotification* notification) override;
     void ContextMenu(BPoint where) override;
     void ApplyTheme(const Theme& theme);
     void ApplySettings(const EditorSettings& settings);
+    void ApplyDocumentStyle();
+    DocumentStyle EffectiveStyle() const;
+    bool FilterEditingInput(BMessage* message);
+    void InsertNewline();
+    void PasteText(const std::string& text);
     void SetLanguage(const std::string& path,bool large=false);
     void SetText(const std::string& bytes,bool readOnly=false,int eol=2);
     std::shared_ptr<EditorLoader> CreateLoader(bool large);
@@ -65,6 +76,11 @@ public:
     void ClearSearchHighlights();
     void GoTo(size_t line,size_t column=1,bool focus=true);
 private:
+    void LayoutMinimap();
+    MinimapView* fMinimap=nullptr;
+    bool fLayingOutMinimap=false;
+    bool PasteClipboard();
+    void ReplaceSelections(const std::vector<std::string>& replacements);
     void Style(int id,rgb_color color,bool bold=false);
     void UpdateMarginWidth();
     std::string fLexer="null",fLanguage="Plain Text";

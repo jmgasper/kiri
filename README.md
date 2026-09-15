@@ -128,6 +128,11 @@ for project-local versions, other languages, configuration and limits.
   font, size and theme. Preferences persist between sessions.
   **Duplicate Theme** creates an editable palette; named colors, import/export and
   stable theme IDs are described in [custom themes](docs/CUSTOM_THEMES.md).
+- **Editing Defaults…** in Preferences configures tabs/spaces, widths, visual
+  column guides and minimaps. **Edit → Document Settings…** shows effective
+  EditorConfig rules and allows document overrides. **View → Minimap** toggles
+  the overview for click/drag navigation. See [editor options](docs/EDITOR_OPTIONS.md)
+  for precedence, paste behavior, column measurements and overview limits.
 - Five dark themes are available: **Obsidian, Nord, Midnight, Forest and Ember**.
   Five light themes are available: **Daylight, Linen, Glacier, Rose and Meadow**.
   **View → Color Theme** also changes the theme directly. Window position,

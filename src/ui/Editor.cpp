@@ -1,4 +1,6 @@
 #include "ui/Editor.h"
+#include "ui/MinimapView.h"
+#include <ScrollBar.h>
 #include "ui/Messages.h"
 #include <ILexer.h>
 #include <Lexilla.h>
@@ -21,6 +23,7 @@ public:
     explicit EditInputFilter(Editor* editor):BMessageFilter(B_ANY_DELIVERY,B_ANY_SOURCE),fEditor(editor) {}
     filter_result Filter(BMessage* message,BHandler**) override {
         if(fEditor->FilterLanguageKey(message)) return B_SKIP_MESSAGE;
+        if(fEditor->FilterEditingInput(message)) return B_SKIP_MESSAGE;
         switch(message->what) {
             case B_KEY_DOWN: {
                 const char* bytes=nullptr;int32 modifiers=0;message->FindInt32("modifiers",&modifiers);
@@ -72,14 +75,34 @@ Editor::Editor():BScintillaView("source",B_FRAME_EVENTS,true,true,B_NO_BORDER) {
     SendMessage(SCI_AUTOCSETMAXHEIGHT,10);SendMessage(SCI_AUTOCSETMAXWIDTH,80);
     SendMessage(SCI_AUTOCSETCHOOSESINGLE,0);SendMessage(SCI_AUTOCSETAUTOHIDE,0);
     Target()->AddFilter(new EditInputFilter(this));
+    fMinimap=new MinimapView(this);AddChild(fMinimap);
 }
 void Editor::AllAttached() {
     BScintillaView::AllAttached();
     // The Haiku port may mark styles valid before it has a drawing surface.
     // Realize fonts again once its inner view has attached to the window.
     ApplyTheme(fTheme);
+    LayoutMinimap();
+}
+void Editor::FrameResized(float width,float height) {BView::FrameResized(width,height);LayoutMinimap();}
+void Editor::DoLayout() {if(fMinimap) LayoutMinimap();else BScintillaView::DoLayout();}
+void Editor::LayoutMinimap() {
+    if(!fMinimap || !Window() || fLayingOutMinimap) return;fLayingOutMinimap=true;
+    auto* horizontal=ScrollBar(B_HORIZONTAL);auto* vertical=ScrollBar(B_VERTICAL);
+    // Own this borderless scroll view's layout. Calling BScrollView::DoLayout
+    // and then shrinking its target repeatedly invalidates Haiku's layout and
+    // prevents the window from painting when the minimap is enabled.
+    float barWidth=vertical?B_V_SCROLL_BAR_WIDTH:0,barHeight=horizontal?B_H_SCROLL_BAR_HEIGHT:0;
+    auto bounds=Bounds();float right=bounds.right-barWidth-(vertical?1:0),bottom=std::max(1.f,bounds.bottom-barHeight-(horizontal?1:0));
+    auto content=std::max(1.f,right-(fSettings.minimap?96:0));
+    Target()->MoveTo(0,0);Target()->ResizeTo(content,bottom);
+    if(horizontal) {horizontal->MoveTo(0,bottom+1);horizontal->ResizeTo(content,barHeight);}
+    if(vertical) {vertical->MoveTo(right+1,0);vertical->ResizeTo(barWidth,bottom);}
+    fMinimap->MoveTo(content+1,0);fMinimap->ResizeTo(95,bottom);fMinimap->InvalidateContent();fLayingOutMinimap=false;
 }
 sptr_t Editor::SendMessage(unsigned int message,uptr_t wParam,sptr_t lParam) {
+    if(!fLoading && message==SCI_NEWLINE) {InsertNewline();return 0;}
+    if(!fLoading && message==SCI_PASTE && PasteClipboard()) return 0;
     // The Haiku port delivers SCN_MODIFIED asynchronously. Count direct edits
     // and input dispatch synchronously so a save cannot miss queued changes.
     bool edit=false;
@@ -87,10 +110,11 @@ sptr_t Editor::SendMessage(unsigned int message,uptr_t wParam,sptr_t lParam) {
         case SCI_ADDTEXT:case SCI_APPENDTEXT:case SCI_INSERTTEXT:case SCI_CLEARALL:
         case SCI_SETTEXT:case SCI_REPLACESEL:case SCI_REPLACETARGET:case SCI_REPLACETARGETRE:
         case SCI_DELETERANGE:case SCI_CLEAR:case SCI_CUT:case SCI_PASTE:case SCI_UNDO:case SCI_REDO:
-        case SCI_SETLINEINDENTATION:NoteInput();edit=true;break;
+        case SCI_SETLINEINDENTATION:case SCI_TAB:case SCI_BACKTAB:NoteInput();edit=true;break;
         default:break;
     }
     auto result=BScintillaView::SendMessage(message,wParam,lParam);
+    if(fMinimap) switch(message) {case SCI_TOGGLEFOLD:case SCI_FOLDLINE:case SCI_FOLDALL:case SCI_HIDELINES:case SCI_SHOWLINES:case SCI_SETWRAPMODE:case SCI_SETZOOM:fMinimap->InvalidateContent();break;default:break;}
     if(edit && Dirty()) ++fState->changes;
     return result;
 }
@@ -157,11 +181,13 @@ void Editor::ApplyTheme(const Theme& t) {
             else if(has("operator")) Style(s,t.accent);
         }
     }
-    UpdateMarginWidth();Invalidate();
+    ApplyDocumentStyle();UpdateMarginWidth();if(fMinimap) fMinimap->ApplyTheme(t);Invalidate();
 }
 void Editor::ApplySettings(const EditorSettings& settings) {
     fSettings=settings;
     ApplyTheme(settings.Colors());
+    SetExplicitMinSize(BSize(settings.minimap?180:80,60));
+    if(fMinimap) {fMinimap->SetEnabled(settings.minimap);LayoutMinimap();}
 }
 void Editor::UpdateMarginWidth() {
     fDigits=std::to_string(SendMessage(SCI_GETLINECOUNT)).size();
@@ -293,6 +319,7 @@ bool Editor::FilterLanguageKey(BMessage* message) {
     return false;
 }
 void Editor::NotificationReceived(SCNotification* n) {
+    if(fMinimap && n->nmhdr.code==SCN_MODIFIED && (n->modificationType&(SC_MOD_CHANGESTYLE|SC_MOD_CHANGEFOLD))) fMinimap->InvalidateContent();
     if(!fLoading && n->nmhdr.code==SCN_MODIFIED && (n->modificationType&(SC_MOD_INSERTTEXT|SC_MOD_DELETETEXT))) { ++fState->revision;++fState->changes; }
     if(fLoading || !Window()) return;
     if(n->nmhdr.code==SCN_DWELLSTART && n->position>=0) ShowDiagnostic(n->position);
@@ -323,14 +350,6 @@ void Editor::NotificationReceived(SCNotification* n) {
     } else if(n->nmhdr.code==SCN_ZOOM) UpdateMarginWidth();
     else if(n->nmhdr.code==SCN_MARGINCLICK && n->margin==1)
         SendMessage(SCI_TOGGLEFOLD,SendMessage(SCI_LINEFROMPOSITION,n->position));
-    else if(n->nmhdr.code==SCN_CHARADDED && n->ch=='\n') {
-        auto line=SendMessage(SCI_LINEFROMPOSITION,SendMessage(SCI_GETCURRENTPOS));
-        if(line>0) {
-            auto indent=SendMessage(SCI_GETLINEINDENTATION,line-1);
-            SendMessage(SCI_SETLINEINDENTATION,line,indent);
-            SendMessage(SCI_GOTOPOS,SendMessage(SCI_GETLINEINDENTPOSITION,line));
-        }
-    }
 }
 void Editor::ContextMenu(BPoint where) {
     BPopUpMenu menu("Editor");
@@ -345,6 +364,7 @@ void Editor::ContextMenu(BPoint where) {
     menu.AddItem(new BMenuItem("File History",new BMessage(kFileHistory)));
     menu.AddSeparatorItem();
     menu.AddItem(new BMenuItem("Find…",new BMessage(kFind)));
+    menu.AddItem(new BMenuItem("Document Settings…",new BMessage(kDocumentSettings)));
     menu.AddItem(new BMenuItem("Go to Line…",new BMessage(kGoToLine)));
     menu.SetTargetForItems(Window());menu.Go(where,true,true);
 }

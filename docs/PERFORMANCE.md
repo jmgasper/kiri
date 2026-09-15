@@ -43,3 +43,28 @@ Project indexing is capped at 500,000 paths; quick-open returns 100 candidates.
 Project text search returns up to 2,000 matches and skips binary files, symlinks
 and individual files over 32 MiB. Git command output is capped at 32 MiB.
 Git history loads 200 commits per request and can continue to the beginning.
+
+## Minimap
+
+Measured September 15, 2026 in the same Haiku beta5 VM with a native editor
+window and warm allocator. Each fixture is loaded before enabling its minimap.
+
+| Document | Cell cache | Forced sampling | Insert at start | Refresh after edit |
+| --- | ---: | ---: | ---: | ---: |
+| 8 KiB | 13,600 bytes | 0.616 ms | 0.069 ms | 0.085 ms |
+| 8 MiB | 94,560 bytes | 1.827 ms | 1.322 ms | 0.603 ms |
+| 200 MiB | 0 bytes (paused) | 0.195 ms | 12.115 ms | 0.006 ms |
+
+Sampling and edit timings measure synchronous native calls, excluding the timer
+interval and display latency. The 200 MiB sample measures the pause check. No
+additional resident mapped areas were observed while enabling these minimaps in
+this warm run; allocator reuse means that does not imply zero memory cost.
+The explicit cell cache is capped at 160 KiB per view, plus the palette and native
+widget. It samples the existing text and styles without another document buffer.
+
+Minimaps update visible views every 150 ms and pause above 32 MiB or 500,000
+document lines. The pause message remains visible while editing continues.
+Turning the minimap off frees its cells and restores editor width.
+Reproduce with `build-haiku/kiri_workspace_tests --editor-options` after
+`make -j4 build-haiku/kiri_workspace_tests`. See
+[editor options](EDITOR_OPTIONS.md) for sampling and navigation behavior.

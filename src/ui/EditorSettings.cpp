@@ -11,6 +11,8 @@ EditorSettings::EditorSettings() {
     fontFamily=family;
 }
 void EditorSettings::Normalize() {
+    indentation.Normalize();std::vector<int> guides;std::string error;
+    if(ParseGuideColumns(GuideColumnsText(guideColumns),guides,error)) guideColumns=std::move(guides);else guideColumns.clear();
     fontSize=std::clamp(fontSize,int32(8),int32(48));
     if(theme<0 || theme>=static_cast<int32>(Theme::Builtins().size())) theme=0;
     if(themeID.empty()) themeID=Theme::Builtins()[theme].definition.id;
@@ -50,6 +52,12 @@ void EditorSettings::ReadFrom(const BMessage& message,const std::string& setting
         }else SelectTheme(id,settings);
     }
     bool enabled=false;if(message.FindBool("semantic_highlighting",&enabled)==B_OK) semanticHighlighting=enabled;
+    if(message.FindBool("indent_tabs",&enabled)==B_OK) indentation.tabs=enabled;
+    if(message.FindInt32("tab_width",&value)==B_OK) indentation.tabWidth=value;
+    if(message.FindInt32("indent_width",&value)==B_OK) indentation.indentWidth=value;
+    if(message.FindBool("minimap",&enabled)==B_OK) minimap=enabled;
+    const char* guides=nullptr;if(message.FindString("guide_columns",&guides)==B_OK) {std::string error;ParseGuideColumns(guides,guideColumns,error);}
+    Normalize();
 }
 void EditorSettings::WriteTo(BMessage& message) const {
     message.AddString("editor_font_family",fontFamily.c_str());
@@ -59,8 +67,21 @@ void EditorSettings::WriteTo(BMessage& message) const {
     message.AddString("theme_id",(themeID.empty()?Theme::Builtins()[theme].definition.id:themeID).c_str());
     if(customTheme) message.AddString("custom_theme",SerializeTheme(*customTheme).c_str());
     message.AddBool("semantic_highlighting",semanticHighlighting);
+    message.AddBool("indent_tabs",indentation.tabs);message.AddInt32("tab_width",indentation.tabWidth);message.AddInt32("indent_width",indentation.indentWidth);
+    message.AddBool("minimap",minimap);message.AddString("guide_columns",GuideColumnsText(guideColumns).c_str());
 }
 bool EditorSettings::operator==(const EditorSettings& other) const {
-    return fontFamily==other.fontFamily && fontSize==other.fontSize && theme==other.theme && themeID==other.themeID && customTheme==other.customTheme && semanticHighlighting==other.semanticHighlighting;
+    return fontFamily==other.fontFamily && fontSize==other.fontSize && theme==other.theme && themeID==other.themeID && customTheme==other.customTheme && semanticHighlighting==other.semanticHighlighting && indentation==other.indentation && guideColumns==other.guideColumns && minimap==other.minimap;
+}
+void WriteDocumentOverrides(BMessage& message,const DocumentOverrides& overrides) {
+    message.AddBool("document_indent_override",bool(overrides.indentation));message.AddBool("document_guides_override",bool(overrides.guides));
+    if(overrides.indentation) {message.AddBool("document_tabs",overrides.indentation->tabs);message.AddInt32("document_tab_width",overrides.indentation->tabWidth);message.AddInt32("document_indent_width",overrides.indentation->indentWidth);}
+    if(overrides.guides) message.AddString("document_guides",GuideColumnsText(*overrides.guides).c_str());
+}
+DocumentOverrides ReadDocumentOverrides(const BMessage& message) {
+    DocumentOverrides overrides;bool enabled=false;
+    if(message.FindBool("document_indent_override",&enabled)==B_OK && enabled) {Indentation indentation;int32 width=0;message.FindBool("document_tabs",&indentation.tabs);if(message.FindInt32("document_tab_width",&width)==B_OK) indentation.tabWidth=width;if(message.FindInt32("document_indent_width",&width)==B_OK) indentation.indentWidth=width;indentation.Normalize();overrides.indentation=indentation;}
+    if(message.FindBool("document_guides_override",&enabled)==B_OK && enabled) {const char* text=nullptr;std::vector<int> guides;std::string error;if(message.FindString("document_guides",&text)==B_OK && ParseGuideColumns(text,guides,error)) overrides.guides=std::move(guides);}
+    return overrides;
 }
 }

@@ -276,6 +276,7 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession,co
     BMessage opened(kWorkspaceOpened);opened.AddMessenger("workspace",BMessenger(this));be_app->PostMessage(&opened);
 }
 Workspace::~Workspace() {
+    for(auto& d:fDocuments) if(d->settingsWindow.IsValid()) d->settingsWindow.SendMessage(B_QUIT_REQUESTED);
     fExternalTimer.reset();stop_watching(BMessenger(this));for(auto& d:fDocuments) if(d->externalWindow.IsValid()) d->externalWindow.SendMessage(B_QUIT_REQUESTED);
     RegisterEditWorkspace(false);
     BMessage closed(kWorkspaceClosed);closed.AddMessenger("workspace",BMessenger(this));be_app->PostMessage(&closed);
@@ -307,11 +308,11 @@ BMenuBar* Workspace::BuildMenus() {
     add(file,"Save",kSave,'S');add(file,"Save As…",kSaveAs,'S',B_SHIFT_KEY);add(file,"Save All",kSaveAll);add(file,"Close Tab",kCloseTab,'W');add(file,"Keep Open",kKeepTab,'K');add(file,"Reopen Closed Tab",kReopenTab,'W',B_SHIFT_KEY);file->AddSeparatorItem();add(file,"Quit",kQuitApplication,'Q');bar->AddItem(file);
     auto* edit=new BMenu("Edit");add(edit,"Undo",B_UNDO,'Z');add(edit,"Redo",B_REDO,'Z',B_SHIFT_KEY);edit->AddSeparatorItem();add(edit,"Cut",B_CUT,'X');add(edit,"Copy",B_COPY,'C');add(edit,"Paste",B_PASTE,'V');add(edit,"Select All",B_SELECT_ALL,'A');edit->AddSeparatorItem();
     add(edit,"Format with Prettier",kFormatPrettier);add(edit,"Complete Code",kComplete);add(edit,"Rename Symbol…",kRenameSymbol);add(edit,"Undo Last Project Edit…",kEditUndo);add(edit,"Language Tools…",kShowLanguageTools);
-    edit->AddSeparatorItem();add(edit,"Preferences…",kShowPreferences,',');bar->AddItem(edit);
+    edit->AddSeparatorItem();add(edit,"Document Settings…",kDocumentSettings);add(edit,"Preferences…",kShowPreferences,',');bar->AddItem(edit);
     auto* view=new BMenu("View");add(view,"Show / Hide Files",kToggleSidebar,'B');add(view,"Show / Hide Terminal",kToggleTerminal,'`');add(view,"Problems",kToggleProblems,'M',B_SHIFT_KEY);add(view,"Source Control",kToggleGit,'G',B_SHIFT_KEY);view->AddSeparatorItem();
     add(view,"Split Right",kSplitRight,'\\');add(view,"Split Down",kSplitDown,'\\',B_SHIFT_KEY);
     add(view,"Focus Next Pane",kNextPane,']',B_CONTROL_KEY);add(view,"Focus Previous Pane",kPreviousPane,'[',B_CONTROL_KEY);add(view,"Close Pane",kClosePane);
-    add(view,"Preview Tabs",kPreviewTabs);view->FindItem(kPreviewTabs)->SetMarked(fPreviewTabs);view->AddSeparatorItem();
+    add(view,"Preview Tabs",kPreviewTabs);view->FindItem(kPreviewTabs)->SetMarked(fPreviewTabs);add(view,"Minimap",kToggleMinimap);view->FindItem(kToggleMinimap)->SetMarked(fEditorSettings.minimap);view->AddSeparatorItem();
     fThemes=ThemeMenu("Color Theme",kTheme,0);fThemes->SetLabelFromMarked(false);
     view->AddItem(fThemes);add(view,"Zoom In",kZoomIn,'+');add(view,"Zoom Out",kZoomOut,'-');add(view,"Word Wrap",kWrap);add(view,"Show Whitespace",kShowWhitespace);bar->AddItem(view);
     auto* search=new BMenu("Search");add(search,"Find / Replace",kFind,'F');add(search,"Find Next",kFindNext);add(search,"Find Previous",kFindPrevious);add(search,"Open Quickly…",kQuickOpen,'P');add(search,"Search Project…",kProjectSearch,'F',B_SHIFT_KEY);add(search,"Go to Line…",kGoToLine,'G');add(search,"Go to Symbol…",kBrowseSymbols,'R',B_SHIFT_KEY);search->AddSeparatorItem();add(search,"Next Problem",kNextProblem);add(search,"Previous Problem",kPreviousProblem);add(search,"Restart Language Servers",kRestartLanguages);search->AddSeparatorItem();add(search,"Compare External Changes…",kExternalCompare);add(search,"Open External Backups…",kExternalBackups);bar->AddItem(search);
@@ -337,7 +338,8 @@ void Workspace::UpdateStatus() {
         status+="  ·  "+d->editor->Language()+"  ·  UTF-8";
         status+=d->editor->SendMessage(SCI_GETEOLMODE)==0?"  CRLF":d->editor->SendMessage(SCI_GETEOLMODE)==1?"  CR":"  LF";
     }
-    Notice(status);
+    if(d->editor) {auto style=d->editor->EffectiveStyle();status+=std::string("  ·  ")+(style.indentation.tabs?"Tabs ":"Spaces ")+std::to_string(style.indentation.indentWidth);if(!style.warning.empty()) status+="  ·  EditorConfig warning";Notice(status);fStatus->SetToolTip((status+"\n\n"+style.origin+(style.warning.empty()?"":"\n\n"+style.warning)+(style.notes.empty()?"":"\n\n"+style.notes)).c_str());}
+    else Notice(status);
 }
 void Workspace::NewFile() {
     auto document=std::make_unique<Document>();document->id=fNextID++;document->name="Untitled "+std::to_string(document->id);
@@ -428,7 +430,7 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
     auto* original=Current();auto originalID=original?original->id:0,originalRevision=original && original->editor?original->editor->InputRevision():0;
     auto loader=fLoaderFactory->CreateLoader(StatFile(path).size>8*1024*1024);
     fJobs->Submit([this,path,line,column,loader,activate,preview,paneID,paneSerial,focusEditor,focus,originalID,originalRevision](const auto& cancel) {
-        struct Loaded { FileData data;std::shared_ptr<BBitmap> image; };
+        struct Loaded { FileData data;std::shared_ptr<BBitmap> image;DocumentConfig config; };
         auto loaded=std::make_shared<Loaded>();
         std::string extension=fs::path(path).extension().string();for(auto& c:extension) c=std::tolower(static_cast<unsigned char>(c));
         const std::set<std::string> imageTypes={".png",".jpg",".jpeg",".gif",".bmp",".webp",".tga",".ico",".tif",".tiff",".icns"};
@@ -436,6 +438,7 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
         if(!loaded->image) {
             if(!loader->loader) loaded->data.error="Not enough memory to open this document.";
             else loaded->data=ReadFile(path,&cancel,1024ULL*1024*1024,[&](std::string_view chunk){return loader->loader->AddData(chunk.data(),chunk.size())==SC_STATUS_OK;});
+            if(loaded->data.ok()) loaded->config=ReadDocumentConfig(path,&cancel);
         }
         return [this,path,line,column,loaded,loader,activate,preview,paneID,paneSerial,focusEditor,focus,originalID,originalRevision] {
             fPendingOpen.erase(path);
@@ -456,7 +459,7 @@ void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool
                     d->editor->SetText(HexPreview(loaded->data.bytes,d->stamp.size),true);
                     if(!loaded->data.utf8 && !loaded->data.binary) d->name+=" · non-UTF-8";
                 } else d->editor->Adopt(*loader,loaded->data.eol);
-                d->editor->SetLanguage(binary?"preview.txt":path,!binary && d->stamp.size>8*1024*1024);d->editor->ApplySettings(fEditorSettings);
+                d->editor->State()->config=std::move(loaded->config);d->editor->SetLanguage(binary?"preview.txt":path,!binary && d->stamp.size>8*1024*1024);d->editor->ApplySettings(fEditorSettings);
             }
             auto* original=ByID(originalID);
             bool front=activate && focus==fFocusSerial && (!original || !original->editor || original->editor->InputRevision()==originalRevision);
@@ -498,9 +501,10 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
     // Save As replacement was confirmed by the native BFilePanel.
     auto text=std::make_shared<std::string>(d->editor->Text());if(d->bom) text->insert(0,"\xef\xbb\xbf");
     int64 revision=d->editor->Revision();d->saving=true;UpdateStatus();
-    fJobs->Submit([this,id,path,expected,text,revision](const auto&) {
+    fJobs->Submit([this,id,path,expected,text,revision](const auto& cancel) {
         auto error=SaveFile(path,*text,expected);auto stamp=StatFile(path);
-        return [this,id,path,error,stamp,revision,text] {
+        auto config=error.empty()?ReadDocumentConfig(path,&cancel):DocumentConfig{};
+        return [this,id,path,error,stamp,revision,text,config=std::move(config)] {
             auto* document=ByID(id);if(!document) return;
             document->saving=false;
             if(!error.empty()) {
@@ -508,6 +512,7 @@ void Workspace::SaveTo(int64 id,const std::string& input) {
             }
             if(document->path!=path) CloseLanguage(*document);
             document->path=path;document->name=fs::path(path).filename().string();document->stamp=stamp;document->external=false;
+            fJobs->Cancel("document-config-"+std::to_string(id));++document->configSerial;document->configPending=false;document->editor->State()->config=config;
             RememberRecent(path,false);
             std::string_view saved(*text);if(document->bom) saved.remove_prefix(3);
             if(document->editor->Matches(saved)) { document->editor->MarkSaved();ClearRecovery(*document); }
@@ -585,7 +590,8 @@ void Workspace::ApplyTheme(int index) {
     BMessage appearance(kWindowTheme);fEditorSettings.WriteTo(appearance);
     for(auto& search:fSearchWindows) if(search.IsValid()) search.SendMessage(&appearance);
     for(auto target:{fEditWindow,fRenameWindow,fLanguageToolsWindow}) if(target.IsValid()) target.SendMessage(&appearance);
-    for(auto& d:fDocuments) if(d->externalWindow.IsValid()) d->externalWindow.SendMessage(&appearance);
+    for(auto& d:fDocuments) {if(d->externalWindow.IsValid()) d->externalWindow.SendMessage(&appearance);if(d->settingsWindow.IsValid()) d->settingsWindow.SendMessage(&appearance);}
+    if(auto* bar=dynamic_cast<BMenuBar*>(FindView("menu"))) if(auto* item=bar->FindItem(kToggleMinimap)) item->SetMarked(fEditorSettings.minimap);
     if(fPreferencesWindow.IsValid()) { BMessage settings(kSyncPreferences);fEditorSettings.WriteTo(settings);fPreferencesWindow.SendMessage(&settings); }
     SaveSettings();
     be_app->PostMessage(kRecentsChanged);
@@ -689,12 +695,14 @@ void Workspace::RestoreDraft(const std::string& file) {
         Draft draft;
         if(!loader->loader) draft.error="Not enough memory to recover this document.";
         else draft=ReadDraft(file,[&](auto chunk){return !cancel && loader->loader->AddData(chunk.data(),chunk.size())==SC_STATUS_OK;});
-        return [this,file,loader,draft=std::move(draft)] {
+        auto config=draft.ok()?ReadDocumentConfig(draft.path,&cancel):DocumentConfig{};
+        return [this,file,loader,draft=std::move(draft),config=std::move(config)] {
             --fRestoringDrafts;
             if(!draft.ok()) { (new BAlert("Document Recovery",(file+"\n\n"+draft.error).c_str(),"OK"))->Go();FinishRestore();return; }
             auto d=std::make_unique<Document>();d->id=fNextID++;d->path=draft.path;d->name=draft.name;d->stamp=draft.base;d->bom=draft.bom;
             d->recoveryFile=file;d->external=!d->path.empty() && StatFile(d->path)!=d->stamp;
             d->editor=new Editor();d->view=d->editor;d->editor->Adopt(*loader,draft.eol);d->editor->MarkRecovered();
+            d->editor->State()->config=config;
             d->editor->SetLanguage(d->path,d->editor->SendMessage(SCI_GETLENGTH)>8*1024*1024);d->editor->ApplySettings(fEditorSettings);
             d->recoveryRevision=d->editor->Revision();d->lastRecovery=system_time();
             AddTab(*fActivePane,*d,false,true);fDocuments.push_back(std::move(d));
@@ -745,6 +753,7 @@ void Workspace::ClearRecovery(Document& d) {
 }
 void Workspace::Pulse() {
     StartRecovery();CheckExternalFiles();PollProject();
+    for(auto& d:fDocuments) RefreshDocumentConfig(*d);
 }
 void Workspace::MessageReceived(BMessage* message) {
     if(message->what==B_NODE_MONITOR) {
@@ -930,6 +939,9 @@ void Workspace::MessageReceived(BMessage* message) {
             break;
         }
         case kShowPreferences:ShowPreferences();break;
+        case kDocumentSettings:ShowDocumentSettings();break;
+        case kApplyDocumentSettings:ApplyDocumentSettings(*message);break;
+        case kToggleMinimap:fEditorSettings.minimap=!fEditorSettings.minimap;ApplyTheme();break;
         case kApplyPreferences: {
             bool semantic=fEditorSettings.semanticHighlighting;fEditorSettings.ReadFrom(*message);
             if(semantic!=fEditorSettings.semanticHighlighting) for(auto& document:fDocuments) if(document->editor) {

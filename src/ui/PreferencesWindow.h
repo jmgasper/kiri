@@ -20,6 +20,7 @@ private:
     void ReadTheme(BMessage& message);
     void ExportTheme(BMessage& message);
     BMessenger fTarget;
+    BMessenger fEditingWindow;
     EditorSettings fApplied,fPending;
     BMenuField* fFont;
     BMenuField* fTheme;

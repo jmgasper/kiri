@@ -8,6 +8,7 @@
 #include "ui/Explorer.h"
 #include "ui/ProblemsView.h"
 #include "ui/PreferencesWindow.h"
+#include "ui/MinimapView.h"
 #include <MenuField.h>
 #include <MenuItem.h>
 #include <CheckBox.h>
@@ -131,6 +132,94 @@ struct WorkspaceTestAccess {
                 CHECK(pane->cards->ItemAt(i+1)->View()==pane->tabs[i]->view);
                 CHECK(pane->tabs[i]->view->Window()==&w);
             }
+        }
+    }
+    static void EditorOptions(const std::string& base) {
+        auto root=base+"/editor-options",settings=root+"/settings";fs::create_directories(root+"/nested");std::ofstream(base+"/.editorconfig")<<"root=true\n";
+        std::ofstream(root+"/.editorconfig")<<"root=true\n[*]\nindent_style=space\nindent_size=2\nmax_line_length=80\n[Makefile]\nindent_style=tab\nindent_size=tab\ntab_width=4\n";
+        auto js=root+"/example.js",makefile=root+"/Makefile";std::ofstream(makefile)<<"all:\n\techo done\n";std::string text;
+        for(int i=0;i<400;++i) text+="function example"+std::to_string(i)+"(value) {\n  const result = value + 1; // "+std::string(100,'x')+"\n  return result;\n}\n\n";
+        std::ofstream(js)<<text;
+        auto visit=[](BMessenger target,const std::function<void(BWindow&)>& action) {CHECK(target.LockTargetWithTimeout(1000000)==B_OK);BLooper* looper=nullptr;target.Target(&looper);auto* window=dynamic_cast<BWindow*>(looper);CHECK(window);action(*window);looper->Unlock();};
+        auto command=[](BWindow& window,uint32 code){BMessage message(code);window.MessageReceived(&message);};
+        auto* w=new Workspace(settings,false);w->Show();CHECK(w->Lock());w->OpenProject(root);Open(*w,makefile);auto* make=w->Current()->editor;
+        CHECK(make->SendMessage(SCI_GETUSETABS)==1 && make->SendMessage(SCI_GETINDENT)==4);Open(*w,js);auto* d=w->Current();auto* editor=d->editor;auto id=d->id;
+        CHECK(editor->SendMessage(SCI_GETUSETABS)==0 && editor->SendMessage(SCI_GETINDENT)==2 && make->SendMessage(SCI_GETUSETABS)==1);
+        CHECK(editor->SendMessage(SCI_GETMULTIEDGECOLUMN,0)==80);CHECK(editor->EffectiveStyle().origin.find(".editorconfig")!=std::string::npos);
+        editor->SendMessage(SCI_APPENDTEXT,1,reinterpret_cast<sptr_t>("!"));editor->SendMessage(SCI_SETSEL,2,6);auto draft=editor->Text();auto revision=editor->InputRevision();
+        w->ShowDocumentSettings();auto dialog=d->settingsWindow;
+        visit(dialog,[&](BWindow& window) {static_cast<BCheckBox*>(window.FindView("override indentation"))->SetValue(1);static_cast<BCheckBox*>(window.FindView("indent tabs"))->SetValue(1);static_cast<BTextControl*>(window.FindView("indent width"))->SetText("3");static_cast<BTextControl*>(window.FindView("tab width"))->SetText("3");static_cast<BCheckBox*>(window.FindView("override guides"))->SetValue(1);static_cast<BTextControl*>(window.FindView("guide columns"))->SetText("72, 100");command(window,'dchg');CHECK(static_cast<BButton*>(window.FindView("apply document settings"))->IsEnabled());command(window,'dapp');});
+        Wait(*w,[&]{return !dialog.IsValid() && editor->SendMessage(SCI_GETINDENT)==3;});CHECK(editor->SendMessage(SCI_GETUSETABS)==1 && editor->SendMessage(SCI_GETMULTIEDGECOLUMN,0)==72);
+        CHECK(editor->Matches(draft) && editor->InputRevision()==revision && editor->Dirty());CHECK(editor->SendMessage(SCI_GETCURRENTPOS)==6 && editor->SendMessage(SCI_GETANCHOR)==2);
+        Send(*w,kSplitRight);auto* second=w->CurrentTab()->editor;CHECK(second!=editor && second->State()==editor->State());CHECK(second->SendMessage(SCI_GETINDENT)==3 && second->SendMessage(SCI_GETMULTIEDGECOLUMN,1)==100);
+        BMessage clear(kApplyDocumentSettings);clear.AddInt64("document",id);WriteDocumentOverrides(clear,{});w->MessageReceived(&clear);CHECK(second->SendMessage(SCI_GETINDENT)==2 && editor->SendMessage(SCI_GETINDENT)==2);
+        std::ofstream(root+"/.editorconfig")<<"root=true\n[*]\nindent_style=space\nindent_size=6\nmax_line_length=90\n[Makefile]\nindent_style=tab\nindent_size=tab\ntab_width=4\n";
+        Wait(*w,[&]{return second->SendMessage(SCI_GETINDENT)==6;});CHECK(editor->SendMessage(SCI_GETMULTIEDGECOLUMN,0)==90);CHECK(editor->Matches(draft) && editor->InputRevision()==revision);
+        // Invalid configuration is visible and falls back without editing bytes.
+        std::ofstream(root+"/.editorconfig")<<"root=true\n[*]\nindent_size=invalid\n";w->RefreshDocumentConfig(*d,true);Wait(*w,[&]{return !d->configPending;});CHECK(!editor->EffectiveStyle().warning.empty());CHECK(std::string(w->fStatus->Text()).find("EditorConfig warning")!=std::string::npos);
+        CHECK(editor->Matches(draft) && editor->InputRevision()==revision);editor->SendMessage(SCI_UNDO);CHECK(editor->Matches(text) && !editor->Dirty());
+        // Persist explicit document settings, independently of shared panes.
+        DocumentOverrides overrides;overrides.indentation=Indentation{false,2,2};overrides.guides=std::vector<int>{80,100};BMessage custom(kApplyDocumentSettings);custom.AddInt64("document",id);WriteDocumentOverrides(custom,overrides);w->MessageReceived(&custom);
+        // Minimap follows the active view's display lines, leaving carets alone.
+        w->fSidebarSplit->SetItemCollapsed(0,true);w->fTerminalSplit->SetItemCollapsed(1,true);w->UpdateIfNeeded();w->Unlock();snooze(100000);CHECK(w->Lock());auto width=second->Target()->Frame().Width();auto caret=second->SendMessage(SCI_GETCURRENTPOS),anchor=second->SendMessage(SCI_GETANCHOR);
+        Send(*w,kToggleMinimap);Wait(*w,[&]{return second->Minimap()->Enabled() && !second->Minimap()->IsHidden() && second->Minimap()->Bounds().Height()>20;});w->UpdateIfNeeded();second->Minimap()->Refresh(true);
+        CHECK(second->Minimap()->CacheBytes()>0 && second->Minimap()->CacheBytes()<=1024*80*2);CHECK(second->Target()->Frame().Width()<width);
+        auto* map=second->Minimap();map->Navigate(map->Bounds().Height()*.9f);CHECK(second->SendMessage(SCI_GETFIRSTVISIBLELINE)>1000);CHECK(second->SendMessage(SCI_GETCURRENTPOS)==caret && second->SendMessage(SCI_GETANCHOR)==anchor);
+        map->MouseDown(BPoint(40,map->Viewport().top+2));map->MouseMoved(BPoint(40,40),B_INSIDE_VIEW,nullptr);map->MouseUp(BPoint(40,40));CHECK(second->SendMessage(SCI_GETFIRSTVISIBLELINE)<500);
+        second->SendMessage(SCI_COLOURISE,0,-1);auto expanded=map->DisplayLines();second->SendMessage(SCI_FOLDLINE,0,SC_FOLDACTION_CONTRACT);map->Refresh(true);CHECK(map->DisplayLines()<expanded);CHECK(editor->SendMessage(SCI_GETLINEVISIBLE,1));second->SendMessage(SCI_FOLDLINE,0,SC_FOLDACTION_EXPAND);
+        second->SendMessage(SCI_SETWRAPMODE,SC_WRAP_WORD);Wait(*w,[&]{return second->SendMessage(SCI_WRAPCOUNT,1)>1;});map->Refresh(true);CHECK(map->DisplayLines()>expanded);auto wrapped=map->DisplayLines();second->SendMessage(SCI_SETZOOM,4);Wait(*w,[&]{map->Refresh();return map->DisplayLines()>=wrapped;});
+        second->SendMessage(SCI_INSERTTEXT,0,reinterpret_cast<sptr_t>("\n\n\n"));map->Refresh(true);CHECK(map->DisplayLines()>=wrapped+3);second->SendMessage(SCI_UNDO);CHECK(second->Matches(text));
+        caret=second->SendMessage(SCI_GETCURRENTPOS);anchor=second->SendMessage(SCI_GETANCHOR);auto narrow=second->Target()->Frame().Width();Send(*w,kToggleMinimap);Wait(*w,[&]{return !map->Enabled() && second->Target()->Frame().Width()>narrow;});CHECK(map->CacheBytes()==0);CHECK(second->SendMessage(SCI_GETCURRENTPOS)==caret && second->SendMessage(SCI_GETANCHOR)==anchor);
+        second->SendMessage(SCI_SETWRAPMODE,SC_WRAP_NONE);second->SendMessage(SCI_SETZOOM,0);w->SaveSettings();CHECK(w->QuitRequested());w->Quit();
+        w=new Workspace(settings,true);w->Show();CHECK(w->Lock());Wait(*w,[&]{return !w->fRestoring;});CHECK(w->fPanes.size()==2);d=w->Current();CHECK(d && d->path==js);CHECK(d->editor->State()->overrides.indentation==overrides.indentation && d->editor->State()->overrides.guides==overrides.guides);
+        CHECK(d->editor->SendMessage(SCI_GETINDENT)==2 && d->editor->SendMessage(SCI_GETMULTIEDGECOLUMN,1)==100);CHECK(d->editor->Matches(text) && !d->editor->Dirty());
+        // Save As loads the destination's rules before exposing its new path,
+        // while explicit document overrides continue to take precedence.
+        auto saved=root+"/nested/saved.js";std::ofstream(root+"/nested/.editorconfig")<<"root=true\n[*]\nindent_style=tab\nindent_size=tab\ntab_width=8\nmax_line_length=110\n";
+        w->SaveTo(d->id,saved);Wait(*w,[&]{return !d->saving;});CHECK(d->path==saved && d->editor->SendMessage(SCI_GETINDENT)==2);CHECK(ReadFile(saved).bytes==text && ReadFile(js).bytes==text);
+        BMessage inherit(kApplyDocumentSettings);inherit.AddInt64("document",d->id);WriteDocumentOverrides(inherit,{});w->MessageReceived(&inherit);
+        for(auto& pane:w->fPanes) for(auto& tab:pane->tabs) if(tab->document==d->id) CHECK(tab->editor->SendMessage(SCI_GETUSETABS)==1 && tab->editor->SendMessage(SCI_GETINDENT)==8 && tab->editor->SendMessage(SCI_GETMULTIEDGECOLUMN,0)==110);
+        CHECK(d->editor->EffectiveStyle().origin.find("nested/.editorconfig")!=std::string::npos);CHECK(d->editor->Matches(text) && !d->editor->Dirty());
+        // Reopening a closed view must retain newer document settings from
+        // the other pane that still owns the buffer.
+        CHECK(w->CloseView(w->CurrentTab()->id,true,false));overrides.indentation=Indentation{false,3,3};overrides.guides=std::vector<int>{70};
+        BMessage newer(kApplyDocumentSettings);newer.AddInt64("document",d->id);WriteDocumentOverrides(newer,overrides);w->MessageReceived(&newer);
+        w->ReopenTab();Wait(*w,[&]{return w->Current() && w->Current()->id==d->id && w->fPendingOpen.empty();});
+        CHECK(w->CurrentTab()->editor->SendMessage(SCI_GETINDENT)==3 && w->CurrentTab()->editor->SendMessage(SCI_GETMULTIEDGECOLUMN,0)==70);CHECK(d->editor->Matches(text) && !d->editor->Dirty());w->Quit();
+        std::cout<<"EditorConfig typing settings, overrides, shared panes, file refresh, guide persistence and minimap navigation passed.\n";
+    }
+    static void EditingDefaults(const std::string& base) {
+        auto root=base+"/editing-defaults",settings=root+"/settings",path=root+"/plain.txt";fs::create_directories(root);std::ofstream(root+"/.editorconfig")<<"root=true\n";std::ofstream(path)<<"original\n";
+        auto visit=[](BMessenger target,const std::function<void(BWindow&)>& action) {CHECK(target.LockTargetWithTimeout(1000000)==B_OK);BLooper* looper=nullptr;target.Target(&looper);auto* window=dynamic_cast<BWindow*>(looper);CHECK(window);action(*window);looper->Unlock();};
+        auto command=[](BWindow& window,uint32 code){BMessage message(code);window.MessageReceived(&message);};
+        auto dialog=[] {BMessenger found;for(int32 i=0;i<be_app->CountWindows();++i) if(auto* window=be_app->WindowAt(i);window && window->LockWithTimeout(1000000)==B_OK) {if(std::string(window->Title())=="Editing Defaults — Kiri") found=BMessenger(window);window->Unlock();}return found;};
+        auto* w=new Workspace(settings,false);w->Show();CHECK(w->Lock());Open(*w,path);auto* editor=w->Current()->editor;editor->SendMessage(SCI_APPENDTEXT,1,reinterpret_cast<sptr_t>("!"));editor->SendMessage(SCI_SETSEL,2,6);auto text=editor->Text();auto revision=editor->InputRevision();
+        for(bool apply:{false,true}) {
+            w->ShowPreferences();auto preferences=w->fPreferencesWindow;visit(preferences,[&](BWindow& window){command(window,kEditingDefaults);});BMessenger editing;
+            Wait(*w,[&]{editing=dialog();return editing.IsValid();});
+            visit(editing,[&](BWindow& window){auto* indent=static_cast<BTextControl*>(window.FindView("indent width"));auto* guides=static_cast<BTextControl*>(window.FindView("guide columns"));indent->SetText("99");guides->SetText("0");command(window,'dchg');CHECK(!static_cast<BButton*>(window.FindView("apply document settings"))->IsEnabled());indent->SetText("2");static_cast<BTextControl*>(window.FindView("tab width"))->SetText("4");guides->SetText("72, 100");static_cast<BCheckBox*>(window.FindView("show minimap"))->SetValue(1);command(window,'dchg');CHECK(static_cast<BButton*>(window.FindView("apply document settings"))->IsEnabled());command(window,'dapp');});
+            Wait(*w,[&]{return !editing.IsValid();});CHECK(!w->fEditorSettings.minimap && w->fEditorSettings.indentation.indentWidth==4);CHECK(editor->Matches(text) && editor->InputRevision()==revision);
+            visit(preferences,[&](BWindow& window){auto* preview=static_cast<Editor*>(window.FindView("preferences preview"));CHECK(preview->SendMessage(SCI_GETINDENT)==2 && preview->SendMessage(SCI_GETMULTIEDGECOLUMN,1)==100 && preview->Minimap()->Enabled());if(apply) command(window,'papl');});
+            if(apply) Wait(*w,[&]{return w->fEditorSettings.minimap;});preferences.SendMessage(B_QUIT_REQUESTED);Wait(*w,[&]{return !preferences.IsValid();});
+            CHECK(w->fEditorSettings.minimap==apply);CHECK(editor->SendMessage(SCI_GETINDENT)==(apply?2:4));CHECK(editor->Matches(text) && editor->InputRevision()==revision && editor->Dirty());CHECK(editor->SendMessage(SCI_GETANCHOR)==2 && editor->SendMessage(SCI_GETCURRENTPOS)==6);
+        }
+        editor->SendMessage(SCI_UNDO);CHECK(editor->Matches("original\n") && !editor->Dirty());w->SaveSettings();CHECK(w->QuitRequested());w->Quit();
+        w=new Workspace(settings,true);w->Show();CHECK(w->Lock());Wait(*w,[&]{return !w->fRestoring;});CHECK(w->fEditorSettings.minimap && w->fEditorSettings.indentation.indentWidth==2 && (w->fEditorSettings.guideColumns==std::vector<int>{72,100}));CHECK(w->Current()->editor->Matches("original\n") && w->Current()->editor->Minimap()->Enabled());w->Quit();
+        std::cout<<"Editing Defaults validation, Preferences preview/Cancel/Apply, document state and restart passed.\n";
+    }
+    static void MinimapBenchmarks() {
+        auto resident=[] {ssize_t cookie=0;area_info area{};uint64_t total=0;while(get_next_area_info(getpid(),&cookie,&area)==B_OK) total+=area.ram_size;return total;};
+        for(size_t size:{size_t(8192),size_t(8*1024*1024),size_t(200*1024*1024)}) {
+            auto* window=new BWindow(BRect(40,40,1050,650),"Minimap benchmark",B_TITLED_WINDOW,0);auto* editor=new Editor();BLayoutBuilder::Group<>(window,B_VERTICAL,0).Add(editor);window->Show();CHECK(window->Lock());
+            std::string chunk;while(chunk.size()<1024*1024) chunk+="  int value = 42; // a bounded minimap sample...................................................\n";chunk.resize(1024*1024);
+            auto loader=editor->CreateLoader(size>8*1024*1024);for(size_t at=0;at<size;at+=chunk.size()) CHECK(loader->loader->AddData(chunk.data(),std::min(chunk.size(),size-at))==SC_STATUS_OK);editor->Adopt(*loader);editor->SetLanguage("sample.cpp",size>8*1024*1024);editor->SendMessage(SCI_SETSEL,0,0);
+            window->Unlock();snooze(100000);CHECK(window->Lock());window->UpdateIfNeeded();auto before=resident();EditorSettings settings;settings.minimap=true;editor->ApplySettings(settings);window->Unlock();snooze(100000);CHECK(window->Lock());
+            auto start=system_time();editor->Minimap()->Refresh(true);auto sampled=system_time()-start;auto memory=resident();CHECK(editor->Minimap()->CacheBytes()<=1024*80*2);
+            if(size>32*1024*1024) CHECK(editor->Minimap()->Status().find("32 MiB")!=std::string::npos && editor->Minimap()->CacheBytes()==0);else CHECK(editor->Minimap()->Status().empty() && editor->Minimap()->CacheBytes()>0);
+            start=system_time();editor->SendMessage(SCI_INSERTTEXT,0,reinterpret_cast<sptr_t>("x"));auto editing=system_time()-start;start=system_time();editor->Minimap()->Refresh();auto refresh=system_time()-start;
+            CHECK(editor->SendMessage(SCI_GETLENGTH)==sptr_t(size+1));CHECK(sampled<1000000 && editing<2000000 && refresh<1000000);
+            std::cout<<"Minimap bytes="<<size<<" cache_bytes="<<editor->Minimap()->CacheBytes()<<" resident_delta_bytes="<<int64(memory-before)<<" sample_ms="<<sampled/1000.0<<" edit_ms="<<editing/1000.0<<" refresh_ms="<<refresh/1000.0<<'\n';
+            settings.minimap=false;editor->ApplySettings(settings);CHECK(editor->Minimap()->CacheBytes()==0);window->Quit();
         }
     }
     static void Analysis(const std::string& base,const std::string& executable) {
@@ -749,6 +838,6 @@ int main(int argc,char** argv) {
     }
     BApplication application("application/x-vnd.Kiri-workspace-unit-tests");
     char folder[]="/tmp/kiri-workspace-XXXXXX";auto* root=mkdtemp(folder);if(!root) return 1;
-    try { if(argc==2 && std::string(argv[1])=="--analysis") {kiri::WorkspaceTestAccess::Analysis(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" analysis workspace checks.\n";return 0;}if(argc==3 && std::string(argv[1])=="--real-analysis") {kiri::WorkspaceTestAccess::RealAnalysis(kiri::CanonicalPath(root),argv[2]);fs::remove_all(root);std::cout<<"Passed "<<checks<<" real analysis checks.\n";return 0;}kiri::WorkspaceTestAccess::Themes(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::AnalysisRendering();kiri::WorkspaceTestAccess::Analysis(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::RefreshAndDiff(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::SearchInput(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
+    try { if(argc==2 && std::string(argv[1])=="--editor-options") {kiri::WorkspaceTestAccess::EditorOptions(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::EditingDefaults(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::MinimapBenchmarks();fs::remove_all(root);std::cout<<"Passed "<<checks<<" editor options workspace checks.\n";return 0;}if(argc==2 && std::string(argv[1])=="--analysis") {kiri::WorkspaceTestAccess::Analysis(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" analysis workspace checks.\n";return 0;}if(argc==3 && std::string(argv[1])=="--real-analysis") {kiri::WorkspaceTestAccess::RealAnalysis(kiri::CanonicalPath(root),argv[2]);fs::remove_all(root);std::cout<<"Passed "<<checks<<" real analysis checks.\n";return 0;}kiri::WorkspaceTestAccess::EditorOptions(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::EditingDefaults(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::MinimapBenchmarks();kiri::WorkspaceTestAccess::Themes(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::AnalysisRendering();kiri::WorkspaceTestAccess::Analysis(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::RefreshAndDiff(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::SearchInput(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<" (test files: "<<root<<")\n";return 1; }
 }

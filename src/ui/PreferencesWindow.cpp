@@ -8,6 +8,7 @@
 #include <Entry.h>
 #include <Path.h>
 #include "core/FileIO.h"
+#include "ui/DocumentSettingsWindow.h"
 #include <LayoutBuilder.h>
 #include <MenuField.h>
 #include <MenuItem.h>
@@ -81,7 +82,7 @@ PreferencesWindow::PreferencesWindow(BMessenger target,const EditorSettings& set
         .Add(fSemantic).Add(fValidation)
         .Add(new BStringView("preview title","Preview · select a named color to edit it"))
         .Add(fPreview)
-        .AddGroup(B_HORIZONTAL,8).Add(defaults).AddGlue().Add(cancel).Add(fApply).Add(fOK).End();
+        .AddGroup(B_HORIZONTAL,8).Add(defaults).Add(new BButton("editing defaults","Editing Defaults…",new BMessage(kEditingDefaults))).AddGlue().Add(cancel).Add(fApply).Add(fOK).End();
     BLayoutBuilder::Group<>(this,B_VERTICAL,0).Add(panel);
     fonts->SetTargetForItems(this);fTheme->Menu()->SetTargetForItems(this);
     SetDefaultButton(fOK);LoadControls();
@@ -89,7 +90,7 @@ PreferencesWindow::PreferencesWindow(BMessenger target,const EditorSettings& set
     MoveTo(std::clamp(parentFrame.left+(parentFrame.Width()-Bounds().Width())/2,screen.left,screen.right-Bounds().Width()),
         std::clamp(parentFrame.top+45,screen.top+30,screen.bottom-Bounds().Height()));
 }
-PreferencesWindow::~PreferencesWindow() = default;
+PreferencesWindow::~PreferencesWindow() {if(fEditingWindow.IsValid()) fEditingWindow.SendMessage(B_QUIT_REQUESTED);}
 void PreferencesWindow::ThemeChoices() {
     PopulateThemeMenu(fTheme->Menu(),kThemeChoice,fPending.theme,fDirectory,fPending.themeID);
     if(fPending.customTheme) {
@@ -165,6 +166,11 @@ void PreferencesWindow::ExportTheme(BMessage& message) {
 }
 void PreferencesWindow::MessageReceived(BMessage* message) {
     switch(message->what) {
+        case kEditingDefaults: {
+            if(fEditingWindow.IsValid()) {fEditingWindow.SendMessage(kActivateWorkspace);break;}
+            auto style=ResolveDocumentStyle(fPending.indentation,fPending.guideColumns,{});auto* window=new DocumentSettingsWindow(BMessenger(this),fPending,style,{},Frame());fEditingWindow=BMessenger(window);window->Show();break;
+        }
+        case kApplyEditingDefaults: {EditorSettings settings=fPending;settings.ReadFrom(*message);fPending.indentation=settings.indentation;fPending.guideColumns=settings.guideColumns;fPending.minimap=settings.minimap;UpdatePreview();break;}
         case kFont: {const char* family;if(message->FindString("editor_font_family",&family)==B_OK) fPending.fontFamily=family;UpdatePreview();break;}
         case kSize:case kName:case kColor:case kSemantic:UpdatePreview();break;
         case kThemeChoice: {

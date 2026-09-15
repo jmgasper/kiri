@@ -181,7 +181,7 @@ bool Workspace::CloseView(int64 id,bool remember,bool collapse) {
     if(remember && !d->path.empty()) { fClosedTabs.push_back({d->path,pane->id,ViewState(*tab)});if(fClosedTabs.size()>64) fClosedTabs.pop_front(); }
     CancelCompletion();
     if(d->formatView==id) { ++d->formatSerial;fJobs->Cancel("format-"+std::to_string(d->id)); }
-    if(last) { ClearRecovery(*d);CloseLanguage(*d);if(d->externalWindow.IsValid()) d->externalWindow.SendMessage(B_QUIT_REQUESTED); }
+    if(last) { ClearRecovery(*d);CloseLanguage(*d);if(d->externalWindow.IsValid()) d->externalWindow.SendMessage(B_QUIT_REQUESTED);if(d->settingsWindow.IsValid()) d->settingsWindow.SendMessage(B_QUIT_REQUESTED);fJobs->Cancel("document-config-"+std::to_string(d->id)); }
     auto found=std::find_if(pane->tabs.begin(),pane->tabs.end(),[&](const auto& t){return t->id==id;});int index=found-pane->tabs.begin();
     tab->view->RemoveSelf();delete tab->view;pane->tabs.erase(found);
     pane->selected=pane->tabs.empty()?-1:std::clamp(pane->selected-(index<pane->selected?1:0),0,int(pane->tabs.size())-1);
@@ -209,6 +209,7 @@ void Workspace::ContinueCloseTabs() {
 }
 BMessage Workspace::ViewState(const Tab& tab) const {
     BMessage state;if(auto* editor=tab.editor) {
+        WriteDocumentOverrides(state,editor->State()->overrides);
         state.AddInt64("caret",editor->SendMessage(SCI_GETCURRENTPOS));state.AddInt64("anchor",editor->SendMessage(SCI_GETANCHOR));
         state.AddInt64("first",editor->SendMessage(SCI_GETFIRSTVISIBLELINE));state.AddInt32("zoom",editor->SendMessage(SCI_GETZOOM));
         state.AddInt32("wrap",editor->SendMessage(SCI_GETWRAPMODE));state.AddInt64("xoffset",editor->SendMessage(SCI_GETXOFFSET));
@@ -229,6 +230,7 @@ BMessage Workspace::ViewState(const Tab& tab) const {
 }
 void Workspace::RestoreView(Tab& tab,const BMessage& state) {
     auto* editor=tab.editor;if(!editor) return;
+    if(state.HasBool("document_indent_override")) {editor->State()->overrides=ReadDocumentOverrides(state);editor->ApplyDocumentStyle();if(auto* d=ByEditor(editor)) UpdateDocumentStyle(*d);}
     int64 caret=0,anchor=0,first=0,xoffset=0;int32 zoom=0,wrap=0;
     state.FindInt64("caret",&caret);state.FindInt64("anchor",&anchor);state.FindInt64("first",&first);
     state.FindInt32("zoom",&zoom);state.FindInt32("wrap",&wrap);state.FindInt64("xoffset",&xoffset);
@@ -260,6 +262,11 @@ void Workspace::ReopenTab() {
     while(!fClosedTabs.empty()) {
         auto closed=std::move(fClosedTabs.back());fClosedTabs.pop_back();
         if(!StatFile(closed.path).exists) { Notice("Cannot reopen missing file: "+closed.path);return; }
+        // A still-open buffer owns the current document settings. The closed
+        // view may predate changes made in another pane.
+        for(const auto& document:fDocuments) if(document->path==closed.path) {
+            closed.state.RemoveName("document_indent_override");closed.state.RemoveName("document_guides_override");break;
+        }
         auto* pane=FindPane(closed.pane);if(!pane) pane=fActivePane;auto paneID=pane->id;
         auto restore=[this,closed,paneID] {
             auto* pane=FindPane(paneID);if(!pane) return;

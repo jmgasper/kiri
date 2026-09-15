@@ -31,4 +31,4 @@ supported.
 
 ## Dependencies and review decisions
 
-Decide provider precedence and what Save does after a formatter failure. Coordinate with [EditorConfig](09-editorconfig-indentation.md) and [autosave](48-autosave.md); a working Haiku formatter must be demonstrated before promising language coverage.
+Decide provider precedence and what Save does after a formatter failure. Coordinate with [EditorConfig](../future_features/done/09-editorconfig-indentation.md) and [autosave](48-autosave.md); a working Haiku formatter must be demonstrated before promising language coverage.

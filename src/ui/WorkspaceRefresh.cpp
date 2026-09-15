@@ -141,6 +141,7 @@ void Workspace::ReloadExternal(Document& d,bool reviewed) {
             if(!data.ok() || StatFile(path)!=data.stamp) { d->externalObserved={};Notice(data.ok()?"Disk changed again; waiting for the next refresh.":data.error);UpdateTabs();return; }
             if(reviewed && (!d->externalChange || data.stamp!=d->externalChange->diskStamp)) { CaptureExternal(*d,kExternalCompare);return; }
             Editor replacement;bool binary=data.binary || !data.utf8;
+            replacement.State()->config=d->editor->State()->config;replacement.State()->overrides=d->editor->State()->overrides;
             if(binary) replacement.SetText(HexPreview(data.bytes,data.stamp.size),true);else replacement.Adopt(*loader,data.eol);
             replacement.SetLanguage(binary?"preview.txt":path,data.stamp.size>8*1024*1024);replacement.ApplySettings(fEditorSettings);replacement.State()->revision=revision+1;replacement.State()->inputRevision=revision+1;
             CancelCompletion();CloseLanguage(*d);ClearRecovery(*d);++d->formatSerial;
