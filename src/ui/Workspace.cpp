@@ -907,7 +907,7 @@ void Workspace::MessageReceived(BMessage* message) {
                 if(message->what==B_UNDO && d && EditPathBusy(d->path)) { Notice("Wait for the project edit to finish before Undo.");break; }
                 if(message->what==B_UNDO && fLastEdit && fLastEdit->rename && !fApplyingEdit) {
                     bool renameUndo=false;for(const auto& file:fLastEdit->files) if(file.applied && !file.restored && file.before.path==d->path && editor->Matches(file.after)) renameUndo=true;
-                    if(renameUndo) { fEditPlan=fLastEdit;fRestoringEdit=true;ApplyProjectEdit(true);break; }
+                    if(renameUndo) { ++fEditSerial;if(fEditWindow.IsValid()) fEditWindow.SendMessage(B_QUIT_REQUESTED);fEditWindow=BMessenger();fEditPlan=fLastEdit;fRestoringEdit=true;ApplyProjectEdit(true);break; }
                 }
                 uint32 command=message->what==B_UNDO?SCI_UNDO:message->what==B_REDO?SCI_REDO:message->what==B_CUT?SCI_CUT:message->what==B_COPY?SCI_COPY:message->what==B_PASTE?SCI_PASTE:SCI_SELECTALL;
                 editor->SendMessage(command);
@@ -959,6 +959,7 @@ void Workspace::MessageReceived(BMessage* message) {
             break;
         }
         case kEditApply: {
+            int64 preview=0;if(message->FindInt64("preview",&preview)!=B_OK || preview!=fEditSerial) break;
             if(!fApplyingEdit && fEditPlan) {
                 BMessage omit;for(int32 i=0;message->FindMessage("omit",i,&omit)==B_OK;++i) { int32 f=-1,m=-1;omit.FindInt32("file",&f);omit.FindInt32("match",&m);
                     if(f>=0 && size_t(f)<fEditPlan->files.size() && m>=0 && size_t(m)<fEditPlan->files[f].edits.size() && !fEditPlan->rename) fEditPlan->files[f].edits[m].selected=false;
@@ -967,8 +968,12 @@ void Workspace::MessageReceived(BMessage* message) {
             }break;
         }
         case kEditUndo:UndoProjectEdit();break;
-        case kEditCancel:fCancelEdit=true;break;
-        case kEditRefresh:if(!fApplyingEdit) { if(fEditPlan && fEditPlan->rename) RenameSymbol(editor);else PreviewReplacement(fReplaceRequest); }break;
+        case kEditCancel:case kEditRefresh: {
+            int64 preview=0;if(message->FindInt64("preview",&preview)!=B_OK || preview!=fEditSerial) break;
+            if(message->what==kEditCancel) fCancelEdit=true;
+            else if(!fApplyingEdit) { if(fEditPlan && fEditPlan->rename) RenameSymbol(editor);else PreviewReplacement(fReplaceRequest); }
+            break;
+        }
         case kQuickOpen:Search(false);break;
         case kProjectSearch:Search(true);break;
         case kGoToLine:PromptLine();break;

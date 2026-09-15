@@ -16,9 +16,9 @@ std::string Visible(std::string text,size_t limit=180) {
     std::string result;for(char c:text) { if(c=='\n') result+="\\n";else if(c=='\r') result+="\\r";else if(c=='\t') result+="\\t";else result+=c; }return result;
 }
 }
-EditPreviewWindow::EditPreviewWindow(BWindow* owner,const EditPlan& plan,const Theme& theme,bool restore)
+EditPreviewWindow::EditPreviewWindow(BWindow* owner,const EditPlan& plan,const Theme& theme,bool restore,int64 serial)
     :BWindow(BRect(0,0,880,650),restore?"Restore Project Edit":plan.title.c_str(),B_TITLED_WINDOW_LOOK,B_FLOATING_APP_WINDOW_FEEL,B_AUTO_UPDATE_SIZE_LIMITS),
-    fPlan(plan),fTarget(owner),fRestore(restore) {
+    fPlan(plan),fTarget(owner),fRestore(restore),fSerial(serial) {
     fList=new BListView("edit files");fList->SetSelectionMessage(new BMessage(kEditSelect));fList->SetInvocationMessage(new BMessage(kEditToggle));
     fList->SetExplicitMinSize(BSize(640,250));
     fDetail=new BTextView("edit detail");fDetail->MakeEditable(false);fDetail->SetWordWrap(true);fDetail->SetExplicitMinSize(BSize(600,150));
@@ -39,7 +39,8 @@ EditPreviewWindow::EditPreviewWindow(BWindow* owner,const EditPlan& plan,const T
     ThemeView(panel,theme);Rebuild();ResizeTo(960,690);CenterIn(owner->Frame());Show();
 }
 EditPreviewWindow::~EditPreviewWindow() { while(auto* item=fList->RemoveItem(int32(0))) delete item; }
-bool EditPreviewWindow::QuitRequested() { if(fBusy) { fTarget.SendMessage(kEditCancel);fStatus->SetText("Cancelling after the current file finishes…");return false; }return true; }
+void EditPreviewWindow::SendAction(uint32 command) { BMessage message(command);message.AddInt64("preview",fSerial);fTarget.SendMessage(&message); }
+bool EditPreviewWindow::QuitRequested() { if(fBusy) { SendAction(kEditCancel);fStatus->SetText("Cancelling after the current file finishes…");return false; }return true; }
 void EditPreviewWindow::Rebuild() {
     auto selection=fList->CurrentSelection();while(auto* item=fList->RemoveItem(int32(0))) delete item;fRows.clear();
     size_t selected=0;
@@ -80,12 +81,12 @@ void EditPreviewWindow::MessageReceived(BMessage* message) {
         else { bool selected=std::any_of(file.edits.begin(),file.edits.end(),[](const auto& e){return e.selected;});for(auto& item:file.edits) item.selected=!selected; }
         Rebuild();
     } else if(message->what==kEditApply && !fBusy) {
-        BMessage apply(kEditApply);apply.AddBool("restore",fRestore);
+        BMessage apply(kEditApply);apply.AddBool("restore",fRestore);apply.AddInt64("preview",fSerial);
         for(size_t i=0;i<fPlan.files.size();++i) for(size_t j=0;j<fPlan.files[i].edits.size();++j)
             if(!fPlan.files[i].edits[j].selected) { BMessage omit;omit.AddInt32("file",i);omit.AddInt32("match",j);apply.AddMessage("omit",&omit); }
         fTarget.SendMessage(&apply);
-    } else if(message->what==kEditRefresh && !fBusy) fTarget.SendMessage(kEditRefresh);
-    else if(message->what==kEditCancel) { if(fBusy) fTarget.SendMessage(kEditCancel);else PostMessage(B_QUIT_REQUESTED); }
+    } else if(message->what==kEditRefresh && !fBusy) SendAction(kEditRefresh);
+    else if(message->what==kEditCancel) { if(fBusy) SendAction(kEditCancel);else PostMessage(B_QUIT_REQUESTED); }
     else if(message->what==kEditPreview) {
         message->FindBool("busy",&fBusy);const char* status=nullptr;if(message->FindString("status",&status)==B_OK) { fStatus->SetText(status);fStatus->SetToolTip(status); }
         int32 file=-1;message->FindInt32("file",&file);

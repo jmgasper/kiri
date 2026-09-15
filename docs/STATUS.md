@@ -4,7 +4,7 @@
 
 Verified September 15, 2026 on Linux and in the existing Haiku R1/beta5 QEMU VM.
 All three CMake/CTest suites passed. Haiku passed 163 core checks, 94 search/edit
-checks (91 on Linux), 266 native editor/worker checks and 323 workspace checks.
+checks (91 on Linux), 266 native editor/worker checks and 328 workspace checks.
 Real-tool runs passed 111 language checks on Linux and 121 on Haiku, including
 Prettier, TypeScript prepareRename/rename, and clangd completion/symbols.
 
@@ -22,7 +22,9 @@ completed writes. Tests also cover buffers in another window, cross-window
 rename and whole-operation Undo from either window, query history persistence,
 rapid query changes, project switches and stale result messages. Delayed
 Scintilla notifications are explicitly exercised: they must not invalidate an
-otherwise unchanged preview. Protocol tests reject stale LSP versions, malformed
+otherwise unchanged preview. Apply, Refresh and Cancel messages are tied to
+the reviewed preview generation, and native tests reject delayed actions from
+a replaced preview. Protocol tests reject stale LSP versions, malformed
 UTF positions, overlapping edits and unsupported resource operations as a whole.
 
 The real TypeScript integration renames an exported function, its import and

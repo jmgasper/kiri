@@ -216,7 +216,7 @@ ctest --test-dir build-host --output-on-failure
 ```
 
 The current suites pass **163 core checks**, **94 Haiku search/edit checks**
-(**91 on Linux**), **266 Haiku editor/file/worker checks** and **323 native
+(**91 on Linux**), **266 Haiku editor/file/worker checks** and **328 native
 workspace checks** (`make check-workspace`). Language checks include real
 Prettier and TypeScript servers: **111 checks** on Linux and **121 on Haiku**,
 where clangd C++ completion and symbols are also exercised:

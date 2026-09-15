@@ -199,8 +199,11 @@ struct WorkspaceTestAccess {
         BMessage request(kProjectReplace);request.AddString("root",root.c_str());request.AddString("query","old");request.AddString("replacement","new");request.AddBool("case",true);
         auto preview=[&] { auto previous=w->fEditPlan;w->PreviewReplacement(request);Wait(*w,[&]{return w->fEditPlan && w->fEditPlan!=previous;});CHECK(w->fEditPlan->files.size()==2); };
         preview();CHECK(w->fEditPlan->files[0].before.path==b);CHECK(w->fEditPlan->files[1].before.text==original);
+        auto oldPreview=w->fEditSerial;preview();BMessage oldApply(kEditApply);oldApply.AddInt64("preview",oldPreview);w->MessageReceived(&oldApply);
+        CHECK(!w->fApplyingEdit);CHECK(ReadFile(b).bytes=="old; old;\r\n");CHECK(editor->Text()==original);
+        BMessage oldRefresh(kEditRefresh);oldRefresh.AddInt64("preview",oldPreview);auto currentPreview=w->fEditSerial;w->MessageReceived(&oldRefresh);CHECK(w->fEditSerial==currentPreview);
         auto inputRevision=editor->InputRevision();SCNotification delayed{};delayed.nmhdr.code=SCN_MODIFIED;delayed.modificationType=SC_MOD_INSERTTEXT;editor->NotificationReceived(&delayed);CHECK(editor->InputRevision()==inputRevision);
-        w->fEditPlan->files[0].edits[1].selected=false;w->ApplyProjectEdit();CHECK(w->fApplyingEdit);Wait(*w,[&]{return !w->fApplyingEdit;});
+        w->fEditPlan->files[0].edits[1].selected=false;BMessage reviewedApply(kEditApply);reviewedApply.AddInt64("preview",w->fEditSerial);w->MessageReceived(&reviewedApply);CHECK(w->fApplyingEdit);Wait(*w,[&]{return !w->fApplyingEdit;});
         CHECK(ReadFile(b).bytes=="new; old;\r\n");CHECK(editor->Text()=="const new = '😀';\r\nnew;\r\n// dirty\r\n");CHECK(editor->Dirty());CHECK(ReadFile(a).bytes=="const old = '😀';\r\nold;\r\n");
         CHECK(w->fLastEdit->files[0].applied);CHECK(w->fLastEdit->files[1].applied);CHECK(StatFile(w->fLastEdit->journal).exists);
         editor->SendMessage(SCI_UNDO);CHECK(editor->Text()==original);
