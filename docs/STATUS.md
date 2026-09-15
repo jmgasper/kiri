@@ -1,5 +1,18 @@
 # Verification record
 
+## Project search field focus — develop
+
+Verified September 15, 2026 in the existing Haiku R1/beta5 QEMU VM. The native
+workspace suite passes 351 checks. A regression test failed on the previous
+build when moving focus from the edited query to the replacement field.
+
+Search and replacement fields now use explicit Enter key actions. Moving focus
+keeps the search window open and does not start a replacement preview. Native
+checks cover typing, changing fields, Enter after refocusing unchanged text,
+the Preview Replace button, arrow navigation, opening the selected result, and
+moving to the results list in Open Quickly. A real mouse click reproduced the
+original closure; the fixed build accepts replacement text with results visible.
+
 ## Advanced search, project replacement and symbol rename — develop
 
 Verified September 15, 2026 on Linux and in the existing Haiku R1/beta5 QEMU VM.

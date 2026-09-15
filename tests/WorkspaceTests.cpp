@@ -4,11 +4,14 @@
 #include "ui/TabStrip.h"
 #include "ui/TerminalPanel.h"
 #include <Application.h>
+#include <Button.h>
 #include <CardLayout.h>
 #include <File.h>
+#include <ListView.h>
 #include <OS.h>
 #include <SplitView.h>
 #include <TextControl.h>
+#include <TextView.h>
 #include <StringView.h>
 #include <filesystem>
 #include <fstream>
@@ -188,6 +191,55 @@ struct WorkspaceTestAccess {
         CHECK(!w->CurrentTab()->editor);detached=w->DetachTab(imageID,BPoint(210,210));CHECK(detached && detached->Lock());
         CHECK(detached->CurrentTab()->view==imageView && !detached->CurrentTab()->editor);CHECK(detached->QuitRequested());detached->Quit();
         CHECK(w->QuitRequested());w->Quit();
+    }
+    static void SearchInput(const std::string& base) {
+        auto root=base+"/search-input-project";fs::create_directories(root);
+        auto file=root+"/example.txt";{std::ofstream(file)<<"old here\nold there\n";}
+        auto* w=new Workspace(base+"/search-input-settings",false);w->Show();CHECK(w->Lock());w->OpenProject(root);
+        w->Search(true);auto search=w->fSearchWindows.back();
+        auto inspect=[&](const std::function<bool(BWindow&)>& action) {
+            if(search.LockTargetWithTimeout(100000)!=B_OK) return false;
+            BLooper* looper=nullptr;search.Target(&looper);auto* window=dynamic_cast<BWindow*>(looper);
+            bool result=window && action(*window);looper->Unlock();return result;
+        };
+        auto type=[&](const char* name,const char* text) {
+            CHECK(inspect([&](BWindow& window) {
+                auto* field=dynamic_cast<BTextControl*>(window.FindView(name));if(!field) return false;
+                field->MakeFocus();
+                for(auto* c=text;*c;++c) { BMessage key(B_KEY_DOWN);key.AddString("bytes",std::string(1,*c).c_str());key.AddInt32("modifiers",0);if(window.PostMessage(&key,field->TextView())!=B_OK) return false; }
+                return true;
+            }));
+        };
+        type("query","old");
+        Wait(*w,[&]{return inspect([](BWindow& window) { auto* results=dynamic_cast<BListView*>(window.FindView("results"));return results && results->CountItems()==3; });});
+        CHECK(inspect([](BWindow& window) { window.FindView("project replacement")->MakeFocus();return true; }));
+        Wait(*w,[&]{return true;});CHECK(search.IsValid());
+        type("project replacement","new");
+        Wait(*w,[&]{return inspect([](BWindow& window) { return std::string(dynamic_cast<BTextControl*>(window.FindView("project replacement"))->Text())=="new"; });});
+        auto previewSerial=w->fEditSerial;
+        CHECK(inspect([](BWindow& window) { window.FindView("include")->MakeFocus();return true; }));
+        Wait(*w,[&]{return true;});CHECK(search.IsValid());CHECK(!w->fEditPlan);CHECK(w->fEditSerial==previewSerial);
+        // Enter previews the replacement even after the unchanged field regains focus.
+        type("project replacement","\n");Wait(*w,[&]{return bool(w->fEditPlan);});
+        CHECK(w->fEditPlan->files.size()==1 && w->fEditPlan->files[0].edits.size()==2);
+        CHECK(w->fEditPlan->files[0].edits[0].edit.text=="new");CHECK(ReadFile(file).bytes=="old here\nold there\n");
+        w->fEditWindow.SendMessage(B_QUIT_REQUESTED);Wait(*w,[&]{return !w->fEditWindow.IsValid();});
+        auto previous=w->fEditPlan;
+        CHECK(inspect([](BWindow& window) { auto* button=dynamic_cast<BButton*>(window.FindView("preview replacement"));return button && button->Invoke()==B_OK; }));
+        Wait(*w,[&]{return w->fEditPlan!=previous;});CHECK(search.IsValid());
+        w->fEditWindow.SendMessage(B_QUIT_REQUESTED);Wait(*w,[&]{return !w->fEditWindow.IsValid();});
+        // Enter in the query still opens the selected result and dismisses search.
+        type("query",std::string(1,B_DOWN_ARROW).c_str());
+        Wait(*w,[&]{return inspect([](BWindow& window) { return dynamic_cast<BListView*>(window.FindView("results"))->CurrentSelection()==2; });});
+        type("query","\n");Wait(*w,[&]{return !search.IsValid() && w->fPendingOpen.empty();});CHECK(w->Current()->path==file);
+        CHECK(w->Current()->editor->SendMessage(SCI_LINEFROMPOSITION,w->Current()->editor->SendMessage(SCI_GETCURRENTPOS))==1);
+        // Open Quickly shares query controls: moving to its list must not accept it.
+        w->Search(false);search=w->fSearchWindows.back();type("query","example");
+        Wait(*w,[&]{return inspect([](BWindow& window) { auto* results=dynamic_cast<BListView*>(window.FindView("results"));return results && results->CountItems()==1; });});
+        CHECK(inspect([](BWindow& window) { window.FindView("results")->MakeFocus();return true; }));
+        Wait(*w,[&]{return true;});CHECK(search.IsValid());
+        CHECK(inspect([](BWindow& window) { return dynamic_cast<BListView*>(window.FindView("results"))->Invoke()==B_OK; }));
+        Wait(*w,[&]{return !search.IsValid();});w->Quit();
     }
     static void SearchAndEdits(const std::string& base,const std::string& executable) {
         auto root=base+"/edit-project",settings=base+"/edit-settings";fs::create_directories(root);
@@ -400,6 +452,6 @@ int main(int argc,char** argv) {
     }
     BApplication application("application/x-vnd.Kiri-workspace-unit-tests");
     char folder[]="/tmp/kiri-workspace-XXXXXX";auto* root=mkdtemp(folder);if(!root) return 1;
-    try { kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
+    try { kiri::WorkspaceTestAccess::SearchInput(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<" (test files: "<<root<<")\n";return 1; }
 }

@@ -47,17 +47,19 @@
 namespace kiri {
 namespace fs=std::filesystem;
 namespace {
-class SearchNavigation:public BMessageFilter {
+class SearchInputKeys:public BMessageFilter {
 public:
-    explicit SearchNavigation(BListView* results):BMessageFilter(B_KEY_DOWN),fResults(results) {}
+    SearchInputKeys(BWindow* window,uint32 accept,BListView* results=nullptr)
+        :BMessageFilter(B_KEY_DOWN),fTarget(window),fAccept(accept),fResults(results) {}
     filter_result Filter(BMessage* message,BHandler**) override {
         const char* bytes=nullptr;if(message->FindString("bytes",&bytes)!=B_OK || !bytes || !*bytes) return B_DISPATCH_MESSAGE;
-        if(bytes[0]!=B_UP_ARROW && bytes[0]!=B_DOWN_ARROW) return B_DISPATCH_MESSAGE;
+        if(bytes[0]==B_ENTER) { fTarget.SendMessage(fAccept);return B_SKIP_MESSAGE; }
+        if(!fResults || (bytes[0]!=B_UP_ARROW && bytes[0]!=B_DOWN_ARROW)) return B_DISPATCH_MESSAGE;
         auto index=fResults->CurrentSelection();index=index<0?0:index+(bytes[0]==B_DOWN_ARROW?1:-1);
         if(fResults->CountItems()) fResults->Select(std::clamp(index,int32(0),fResults->CountItems()-1));
         fResults->ScrollToSelection();return B_SKIP_MESSAGE;
     }
-private:BListView* fResults;
+private:BMessenger fTarget;uint32 fAccept;BListView* fResults;
 };
 class SearchItem:public BStringItem {
 public:
@@ -89,10 +91,12 @@ public:
     SearchWindow(BWindow* owner,std::string root,std::shared_ptr<ProjectIndex> index,bool search,const Theme& theme,bool preview)
         :BWindow(BRect(0,0,700,420),search?"Search Project":"Open Quickly",B_TITLED_WINDOW_LOOK,B_FLOATING_APP_WINDOW_FEEL,B_AUTO_UPDATE_SIZE_LIMITS),
         fTarget(owner),fRoot(std::move(root)),fIndex(std::move(index)),fSearch(search),fTheme(theme) {
-        fQuery=new BTextControl("query","", "",new BMessage(kQueryResult));fQuery->SetModificationMessage(new BMessage(kQueryChanged));
+        // BTextControl also invokes when edited text loses focus. Accept only
+        // explicit Enter presses, so moving to another field cannot open a result.
+        fQuery=new BTextControl("query","", "",nullptr);fQuery->SetModificationMessage(new BMessage(kQueryChanged));
         fResults=new BListView("results");fResults->SetInvocationMessage(new BMessage(kQueryResult));
         if(preview) fResults->SetSelectionMessage(new BMessage(kQueryPreview));
-        fResults->SetExplicitMinSize(BSize(480,240));fQuery->TextView()->AddFilter(new SearchNavigation(fResults));
+        fResults->SetExplicitMinSize(BSize(480,240));fQuery->TextView()->AddFilter(new SearchInputKeys(this,kQueryResult,fResults));
         fStatus=new BStringView("search status",search?"Search text in project files":"Type part of a file path");fStatus->SetTruncation(B_TRUNCATE_END);fStatus->SetExplicitMinSize(BSize(200,24));
         auto* panel=new BView("search panel",B_WILL_DRAW);
         auto layout=BLayoutBuilder::Group<>(panel,B_VERTICAL,8).SetInsets(12);
@@ -105,7 +109,8 @@ public:
             fFolders=new BTextControl("folders","Folders","",new BMessage(kQueryChanged));
             fInclude=new BTextControl("include","Include","",new BMessage(kQueryChanged));
             fExclude=new BTextControl("exclude","Exclude","",new BMessage(kQueryChanged));
-            fReplacement=new BTextControl("project replacement","Replace","",new BMessage(kProjectReplace));
+            fReplacement=new BTextControl("project replacement","Replace","",nullptr);
+            fReplacement->TextView()->AddFilter(new SearchInputKeys(this,kProjectReplace));
             fFolders->SetToolTip("Project-relative folders separated by semicolons: src;tests");
             fInclude->SetToolTip("Semicolon-separated globs: *.cpp;*.h. * spans folders; **/ also matches the project root.");
             fExclude->SetToolTip("Exclude globs, for example: generated/*;*.min.js");
