@@ -43,6 +43,13 @@ preview/dirty flags and positions, plus the active editor's text up to 8 KiB.
 Send `lprb` directly to the smoke application to inspect all workspace windows,
 including detached windows; each pane reports its tab-strip and panel coordinates.
 
+`make check-markdown-native` exercises the live Markdown preview, scrolling,
+resources, keyboard navigation and tab lifecycle. Keep the desktop awake while
+running native layout checks; the screen saver can suppress Scintilla's painting
+and visible-line wrapping. `python3 tools/vm.py key shift` wakes it without
+inserting text. `build-haiku/kiri_markdown_native_tests --visual` opens an isolated
+interactive Markdown fixture for mouse/keyboard inspection.
+
 Stop gracefully with `bash tools/haiku.sh shutdown`. Check the live QMP handle
 before attempting to start another instance; do not infer termination from an SSH timeout.
 

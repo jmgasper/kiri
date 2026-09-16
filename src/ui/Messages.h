@@ -1,6 +1,7 @@
 #pragma once
 #include <SupportDefs.h>
 namespace kiri {
+constexpr uint32 kMarkdownPreview='mdpv',kMarkdownFocus='mdfc',kMarkdownLink='mdln';
 constexpr uint32 kDocumentSettings='dcst',kApplyDocumentSettings='dcap',kEditingDefaults='eddf',kApplyEditingDefaults='edad',kToggleMinimap='mmap';
 constexpr uint32 kWindowTheme='wthm',kThemeLibraryChanged='thlb';
 constexpr uint32 kToggleProblems='prob',kNextProblem='pbnx',kPreviousProblem='pbpr',kJumpProblem='pbgo',kRestartLanguages='lgrs';

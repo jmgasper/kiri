@@ -1,5 +1,34 @@
 # Verification record
 
+## Live Markdown preview — develop
+
+Verified September 16, 2026 on Linux and Haiku R1/beta5 in the existing QEMU VM.
+All seven host CMake/CTest suites passed, including 85 Markdown parser/resource
+checks. The native application build and `make check check-native check-language
+check-workspace check-markdown-native` passed. The broader run included 373
+native editor/worker checks and 959 workspace checks.
+
+The Markdown workspace suite checks unsaved revisions and stale-result rejection,
+incomplete syntax, local images, escaped resource paths, blocked schemes, heading
+links, two-way scrolling without changing the caret/selection/dirty state,
+source wrapping/folding/zoom, themes and resizing. It also covers shared buffers,
+tab moves, closing pending work, Save As, reopening, detaching, external reload,
+session restoration and recovery from the explicit size limit.
+
+Real QEMU keyboard input added a heading that appeared while the tab remained
+unsaved. Focus, Page Down and Escape worked; mouse activation of a heading link
+aligned both views, and a relative file link opened at its requested heading.
+Dragging the divider and switching between dark and light themes kept headings,
+tables, code, literal HTML and image placeholders readable. A focus outline left
+behind by native scroll blitting was corrected with a viewport repaint.
+
+The 8,001-line fixture rendered in about 385 ms, including debounce and delivery;
+a resize settled in 42 ms. See [measurements](PERFORMANCE.md#markdown-preview),
+[usage and policy](MARKDOWN_PREVIEW.md) and
+[completed feature 42](future_features/done/42-markdown-preview.md).
+Keep the VM desktop awake for the native wrapping checks: Scintilla lays out
+visible lines during painting, which the screen saver can suppress.
+
 ## EditorConfig, minimaps and column guides — develop
 
 Verified September 15, 2026 on Linux and Haiku R1/beta5 in the existing QEMU VM.

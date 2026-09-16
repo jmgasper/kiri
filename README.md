@@ -149,6 +149,11 @@ for project-local versions, other languages, configuration and limits.
 - Images use installed Haiku translators, a transparency checkerboard and
   fit/actual-size modes. Double-click to switch size; drag to pan at actual size.
   Other binary formats open as read-only, bounded hex previews.
+- **View → Markdown Preview** (Alt+Shift+V) renders unsaved Markdown beside its
+  source, with local images, tables and scrolling synchronized in both directions.
+  **Focus Markdown Preview** (Alt+Ctrl+V) enables keyboard scrolling and link
+  navigation. See [Markdown preview](docs/MARKDOWN_PREVIEW.md) for the dialect,
+  resource policy and document limits.
 - The terminal panel uses the same tabs as the editor. **+** or
   **Terminal → New Terminal** opens another independent shell in the current
   project directory. Tabs retain their directory, variables and scrollback while
@@ -273,6 +278,8 @@ Unmodified libvterm 0.3.3 is vendored under its MIT license; see
 [the pinned source](vendor/libvterm/UPSTREAM.md) and [license](vendor/libvterm/LICENSE).
 JSON for Modern C++ 3.12.0 is also vendored under MIT; see its
 [pinned source](vendor/nlohmann/UPSTREAM.md) and [license](vendor/nlohmann/LICENSE.MIT).
+MD4C 0.5.2 supplies native Markdown parsing under MIT; see its
+[pinned source](vendor/md4c/UPSTREAM.md) and [license](vendor/md4c/LICENSE.md).
 
 The workspace organization takes inspiration from
 [Nova](https://help.nova.app/projects/workspace/) and Xcode. Kiri uses its own UI;

@@ -91,6 +91,8 @@ private:
     void ShowDocument(Pane& pane,Document& document,size_t line,size_t column,bool preview,bool activate,bool focusEditor,bool firstView=false);
     void PromotePreviews();
     void KeepTab(int index);
+    void SetMarkdownPreview(Tab& tab,bool enabled);
+    void OpenMarkdownLink(const BMessage& message);
     void SplitPane(orientation direction);
     void CyclePane(int step);
     void RemoveEmptyPane(Pane* pane);

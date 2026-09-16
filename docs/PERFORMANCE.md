@@ -68,3 +68,28 @@ Turning the minimap off frees its cells and restores editor width.
 Reproduce with `build-haiku/kiri_workspace_tests --editor-options` after
 `make -j4 build-haiku/kiri_workspace_tests`. See
 [editor options](EDITOR_OPTIONS.md) for sampling and navigation behavior.
+
+## Markdown preview
+
+Measured September 16, 2026 in the Haiku beta5 VM. The native Markdown test
+opens a real workspace and renders a small README before the long fixture, so
+fonts and the translator service are warm. The long fixture contains 2,000
+headings and paragraphs with emphasis and links (8,001 source lines).
+
+| Operation | Observed elapsed time |
+| --- | ---: |
+| Parse a 134,890-byte README on the worker/core path | 4 ms |
+| Replace the buffer and deliver the 8,001-line native preview | 385 ms |
+| Resize and settle the same preview | 42 ms |
+
+The render measurement includes the 100 ms change check, 150 ms debounce,
+parsing, native layout and test polling; it is not a per-keystroke cost or a
+worst-case guarantee. Native font measurements are cached and adjacent runs
+share drawing operations. Source edits never wait on Markdown parsing or image
+decoding; bounded native layout runs on the window thread when results arrive.
+
+The preview pauses above 2 MiB, 30,000 source lines, 150,000 parser events, 128
+nesting levels or 60,000 layout fragments. Local image input and decoded bitmap
+headers have separate limits. See [Markdown preview](MARKDOWN_PREVIEW.md) for
+resource policy and limits. Reproduce with `make check check-markdown-native`
+inside the VM with the desktop awake.

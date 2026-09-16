@@ -2,12 +2,15 @@
 #include "ui/Editor.h"
 #include "ui/FileIcons.h"
 #include "ui/PreviewView.h"
+#include "ui/MarkdownView.h"
 #include "ui/SymbolBar.h"
 #include "ui/TabStrip.h"
 #include <Alert.h>
 #include <CardLayout.h>
 #include <FilePanel.h>
 #include <LayoutBuilder.h>
+#include <MenuBar.h>
+#include <MenuItem.h>
 #include <SplitView.h>
 #include <StringView.h>
 #include <algorithm>
@@ -106,6 +109,12 @@ void Workspace::UpdateTabs() {
         for(auto& tab:pane->tabs) if(auto* d=ByID(tab->document))
             labels.push_back({d->name+(d->external?" !":""),d->path+(tab->preview?" · Preview — double-click to keep open":""),tab->editor && tab->editor->Dirty(),tab->id,FileIcon(d->path.empty()?d->name:d->path),tab->preview});
         pane->strip->SetTabs(std::move(labels),pane->selected);pane->strip->SetActive(pane.get()==fActivePane);
+    }
+    for(auto& pane:fPanes) for(auto& tab:pane->tabs) if(auto* preview=dynamic_cast<MarkdownPane*>(tab->view)) {preview->SetPath(ByID(tab->document)->path);preview->Refresh();}
+    if(auto* bar=dynamic_cast<BMenuBar*>(FindView("menu"))) {
+        auto* tab=CurrentTab();
+        if(auto* item=bar->FindItem(kMarkdownPreview)) {item->SetEnabled(tab && tab->editor);item->SetMarked(tab && dynamic_cast<MarkdownPane*>(tab->view));}
+        if(auto* item=bar->FindItem(kMarkdownFocus)) item->SetEnabled(tab && tab->editor);
     }
     UpdateStatus();
 }
@@ -209,6 +218,9 @@ void Workspace::ContinueCloseTabs() {
 }
 BMessage Workspace::ViewState(const Tab& tab) const {
     BMessage state;if(auto* editor=tab.editor) {
+        if(auto* markdown=dynamic_cast<MarkdownPane*>(tab.view)) {
+            state.AddBool("markdown",true);float a=markdown->ItemWeight(int32(0)),b=markdown->ItemWeight(int32(1));state.AddFloat("markdown_ratio",a>0 && b>0?a/(a+b):.5f);
+        }
         WriteDocumentOverrides(state,editor->State()->overrides);
         state.AddInt64("caret",editor->SendMessage(SCI_GETCURRENTPOS));state.AddInt64("anchor",editor->SendMessage(SCI_GETANCHOR));
         state.AddInt64("first",editor->SendMessage(SCI_GETFIRSTVISIBLELINE));state.AddInt32("zoom",editor->SendMessage(SCI_GETZOOM));
@@ -230,6 +242,8 @@ BMessage Workspace::ViewState(const Tab& tab) const {
 }
 void Workspace::RestoreView(Tab& tab,const BMessage& state) {
     auto* editor=tab.editor;if(!editor) return;
+    bool markdown=false;state.FindBool("markdown",&markdown);SetMarkdownPreview(tab,markdown);
+    if(auto* preview=dynamic_cast<MarkdownPane*>(tab.view)) {float ratio=.5;state.FindFloat("markdown_ratio",&ratio);ratio=std::isfinite(ratio)?std::clamp(ratio,.1f,.9f):.5f;preview->SetItemWeight(int32(0),ratio,true);preview->SetItemWeight(int32(1),1-ratio,true);}
     if(state.HasBool("document_indent_override")) {editor->State()->overrides=ReadDocumentOverrides(state);editor->ApplyDocumentStyle();if(auto* d=ByEditor(editor)) UpdateDocumentStyle(*d);}
     int64 caret=0,anchor=0,first=0,xoffset=0;int32 zoom=0,wrap=0;
     state.FindInt64("caret",&caret);state.FindInt64("anchor",&anchor);state.FindInt64("first",&first);

@@ -5,6 +5,7 @@
 #include "ui/GitView.h"
 #include "ui/Messages.h"
 #include "ui/PreviewView.h"
+#include "ui/MarkdownView.h"
 #include "ui/TabStrip.h"
 #include "ui/TerminalPanel.h"
 #include "ui/RefreshButton.h"
@@ -313,6 +314,7 @@ BMenuBar* Workspace::BuildMenus() {
     add(view,"Split Right",kSplitRight,'\\');add(view,"Split Down",kSplitDown,'\\',B_SHIFT_KEY);
     add(view,"Focus Next Pane",kNextPane,']',B_CONTROL_KEY);add(view,"Focus Previous Pane",kPreviousPane,'[',B_CONTROL_KEY);add(view,"Close Pane",kClosePane);
     add(view,"Preview Tabs",kPreviewTabs);view->FindItem(kPreviewTabs)->SetMarked(fPreviewTabs);add(view,"Minimap",kToggleMinimap);view->FindItem(kToggleMinimap)->SetMarked(fEditorSettings.minimap);view->AddSeparatorItem();
+    add(view,"Markdown Preview",kMarkdownPreview,'V',B_SHIFT_KEY);add(view,"Focus Markdown Preview",kMarkdownFocus,'V',B_CONTROL_KEY);view->AddSeparatorItem();
     fThemes=ThemeMenu("Color Theme",kTheme,0);fThemes->SetLabelFromMarked(false);
     view->AddItem(fThemes);add(view,"Zoom In",kZoomIn,'+');add(view,"Zoom Out",kZoomOut,'-');add(view,"Word Wrap",kWrap);add(view,"Show Whitespace",kShowWhitespace);bar->AddItem(view);
     auto* search=new BMenu("Search");add(search,"Find / Replace",kFind,'F');add(search,"Find Next",kFindNext);add(search,"Find Previous",kFindPrevious);add(search,"Open Quickly…",kQuickOpen,'P');add(search,"Search Project…",kProjectSearch,'F',B_SHIFT_KEY);add(search,"Go to Line…",kGoToLine,'G');add(search,"Go to Symbol…",kBrowseSymbols,'R',B_SHIFT_KEY);search->AddSeparatorItem();add(search,"Next Problem",kNextProblem);add(search,"Previous Problem",kPreviousProblem);add(search,"Restart Language Servers",kRestartLanguages);search->AddSeparatorItem();add(search,"Compare External Changes…",kExternalCompare);add(search,"Open External Backups…",kExternalBackups);bar->AddItem(search);
@@ -584,6 +586,7 @@ void Workspace::ApplyTheme(int index) {
         for(auto& tab:pane->tabs) {
             if(tab->editor) tab->editor->ApplySettings(fEditorSettings);
             if(auto* preview=dynamic_cast<PreviewView*>(tab->view)) preview->ApplyTheme(theme);
+            if(auto* markdown=dynamic_cast<MarkdownPane*>(tab->view)) markdown->ApplySettings(fEditorSettings);
         }
     }
     PopulateThemeMenu(fThemes,kTheme,fEditorSettings.theme,fSettings,fEditorSettings.themeID);fThemes->SetTargetForItems(this);
@@ -789,6 +792,9 @@ void Workspace::MessageReceived(BMessage* message) {
         return message->FindInt32("index",&index)==B_OK?static_cast<int>(index):fActivePane->selected;
     };
     switch(message->what) {
+        case kMarkdownPreview:if(auto* tab=CurrentTab();tab && tab->editor) {SetMarkdownPreview(*tab,!dynamic_cast<MarkdownPane*>(tab->view));UpdateTabs();SaveSettings();}break;
+        case kMarkdownFocus:if(auto* tab=CurrentTab();tab && tab->editor) {SetMarkdownPreview(*tab,true);static_cast<MarkdownPane*>(tab->view)->Preview()->MakeFocus();UpdateTabs();SaveSettings();}break;
+        case kMarkdownLink:OpenMarkdownLink(*message);break;
         case kLanguageTick:LanguageTick();break;
         case kShowLanguageTools:ShowLanguageTools();break;
         case kApplyLanguageTools: {

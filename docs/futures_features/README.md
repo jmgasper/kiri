@@ -3,11 +3,11 @@
 Researched **2026-09-14** against Kiri **0.0.1 alpha**, source commit
 `5ab4ba5517cf04f9de8ab05aad596f9cb9933215`.
 
-This catalog contains **36 draft proposals and 14 completed features** based on features found in CodeEdit,
+This catalog contains **35 draft proposals and 15 completed features** based on features found in CodeEdit,
 CotEditor and JetBrains Fleet. Each file describes the reference behavior,
 Kiri's current support, a candidate scope, acceptance checks, dependencies and
 decisions to make before handing it to Codex as an implementation goal. Completed
-features 01, 04, 05, 06, 08, 09, 20, 21, 22, 25, 26, 29, 31 and 40 are archived in [the done folder](../future_features/done/);
+features 01, 04, 05, 06, 08, 09, 20, 21, 22, 25, 26, 29, 31, 40 and 42 are archived in [the done folder](../future_features/done/);
 their acceptance checks record implementation verification.
 
 The scopes, priorities and sizes are suggestions for the owner to edit. The
@@ -40,7 +40,7 @@ and qualifications appear in each feature file.
 ## Suggested review order
 
 - **Soon:** everyday workflow gaps and useful foundations; 9 proposals.
-- **Next:** useful additions after the relevant foundations; 16 proposals.
+- **Next:** useful additions after the relevant foundations; 15 proposals.
 - **Later:** optional polish or more specialized workflows; 7 proposals.
 - **Research:** resolve Haiku/tooling/architecture feasibility first; 4 proposals.
 
@@ -129,7 +129,7 @@ remain a larger candidate.
 | 33 | [Saved build/run tasks](33-task-runner.md) | CE, F | Partial | Soon / M |
 | 34 | [Test discovery, results and reruns](34-test-runner.md) | F | Missing | Later / L |
 | 35 | [Integrated debugging](35-debugger.md) | F | Missing | Research / XL |
-| 42 | [Live Markdown preview](42-markdown-preview.md) | F | Partial | Next / L |
+| 42 | [Live Markdown preview](../future_features/done/42-markdown-preview.md) | F | Done | Implemented / L |
 | 43 | [User script actions](43-script-actions.md) | CO | Partial | Next / M |
 | 44 | [Terminal profiles](44-terminal-profiles.md) | F | Partial | Later / M |
 | 45 | [Remote development over SSH](45-remote-development.md) | F | Missing | Research / XL |

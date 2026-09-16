@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 add_library(kiri_core
+    src/core/Markdown.cpp
     src/core/DocumentSettings.cpp src/core/EditorConfig.cpp
     src/core/ColorTheme.cpp src/core/LanguageAnalysis.cpp
     src/core/Process.cpp src/core/Git.cpp src/core/GitDiff.cpp src/core/Diff.cpp src/core/FileIO.cpp
@@ -16,6 +17,8 @@ find_path(PCRE2_INCLUDE_DIR pcre2.h REQUIRED)
 find_library(PCRE2_LIBRARY pcre2-8 REQUIRED)
 target_include_directories(kiri_core PRIVATE ${PCRE2_INCLUDE_DIR})
 target_link_libraries(kiri_core PUBLIC Threads::Threads ${PCRE2_LIBRARY})
+add_library(kiri_md4c STATIC vendor/md4c/md4c.c vendor/md4c/entity.c)
+target_link_libraries(kiri_core PUBLIC kiri_md4c)
 
 file(GLOB VTERM_SOURCES CONFIGURE_DEPENDS vendor/libvterm/src/*.c)
 add_library(kiri_vterm STATIC ${VTERM_SOURCES})
@@ -25,6 +28,9 @@ target_link_libraries(kiri_core PUBLIC kiri_vterm)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(kiri_markdown_tests tests/MarkdownTests.cpp)
+    target_link_libraries(kiri_markdown_tests PRIVATE kiri_core)
+    add_test(NAME kiri_markdown COMMAND kiri_markdown_tests)
     add_executable(kiri_document_settings_tests tests/DocumentSettingsTests.cpp)
     target_link_libraries(kiri_document_settings_tests PRIVATE kiri_core)
     add_test(NAME kiri_document_settings COMMAND kiri_document_settings_tests)
@@ -50,7 +56,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
     find_path(LEXILLA_INCLUDE_DIR SciLexer.h PATH_SUFFIXES lexilla REQUIRED)
     find_library(SCINTILLA_LIBRARY scintilla REQUIRED)
     find_library(LEXILLA_LIBRARY lexilla REQUIRED)
-    set(KIRI_UI_SOURCES src/ui/Workspace.cpp src/ui/Editor.cpp src/ui/EditorAnalysis.cpp src/ui/EditorIndentation.cpp
+    set(KIRI_UI_SOURCES src/ui/Workspace.cpp src/ui/MarkdownView.cpp src/ui/WorkspaceMarkdown.cpp src/ui/Editor.cpp src/ui/EditorAnalysis.cpp src/ui/EditorIndentation.cpp
         src/ui/WorkspaceSettings.cpp src/ui/DocumentSettingsWindow.cpp src/ui/MinimapView.cpp
         src/ui/Theme.cpp src/ui/Explorer.cpp src/ui/TerminalView.cpp
         src/ui/PreviewView.cpp src/ui/GitView.cpp src/ui/DiffView.cpp src/ui/TabStrip.cpp
@@ -64,6 +70,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
     target_link_libraries(Kiri PRIVATE kiri_core ${SCINTILLA_LIBRARY} ${LEXILLA_LIBRARY}
         be tracker translation)
     if(BUILD_TESTING)
+        add_executable(kiri_markdown_native_tests tests/MarkdownNativeTests.cpp ${KIRI_UI_SOURCES})
+        target_include_directories(kiri_markdown_native_tests PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
+        target_compile_options(kiri_markdown_native_tests PRIVATE -Wno-multichar)
+        target_link_libraries(kiri_markdown_native_tests PRIVATE kiri_core ${SCINTILLA_LIBRARY} ${LEXILLA_LIBRARY} be tracker translation)
+        add_test(NAME kiri_markdown_native COMMAND kiri_markdown_native_tests)
+        set_tests_properties(kiri_markdown_native PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
         add_executable(kiri_native_tests tests/NativeTests.cpp src/ui/Editor.cpp src/ui/EditorAnalysis.cpp src/ui/EditorIndentation.cpp src/ui/MinimapView.cpp src/ui/Theme.cpp src/ui/EditorSettings.cpp src/ui/FileIcons.cpp src/ui/RecentItems.cpp)
         target_include_directories(kiri_native_tests PRIVATE ${SCINTILLA_INCLUDE_DIR} ${LEXILLA_INCLUDE_DIR})
         target_link_libraries(kiri_native_tests PRIVATE kiri_core ${SCINTILLA_LIBRARY} ${LEXILLA_LIBRARY} be)
@@ -99,6 +111,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
         DESTINATION documentation/packages/kiri/vendor/libvterm)
     install(FILES vendor/nlohmann/LICENSE.MIT vendor/nlohmann/UPSTREAM.md
         DESTINATION documentation/packages/kiri/vendor/nlohmann)
+    install(FILES vendor/md4c/LICENSE.md vendor/md4c/UPSTREAM.md
+        DESTINATION documentation/packages/kiri/vendor/md4c)
     install(PROGRAMS tools/install-language-tools.sh DESTINATION documentation/packages/kiri/tools)
 else()
     message(STATUS "Host build: portable core and tests. Build on Haiku for the native UI.")
