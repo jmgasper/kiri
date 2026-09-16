@@ -31,15 +31,17 @@ public:
     int64 DisplayLines() const {return fDisplayLines;}
 private:
     void Timer();
+    float ContentHeight() const;
     Editor* fEditor;
     Theme fTheme=Theme::Builtins()[0];
     std::unique_ptr<BMessageRunner> fTimer;
     std::vector<uint16_t> fCells;
     std::array<rgb_color,256> fPalette;
     std::string fStatus;
-    int64 fRevision=-1,fDisplayLines=1,fFirst=0,fVisible=1;
+    int64 fRevision=-1,fDisplayLines=1,fFirst=0,fVisible=1,fSampleFirst=0,fDragFirst=0;
+    double fMapOffset=0;
     int fRows=0,fWidth=0,fZoom=0,fWrap=0;
     bool fEnabled=false,fStale=true,fDragging=false;
-    float fDragOffset=0;
+    float fDragY=0;
 };
 }

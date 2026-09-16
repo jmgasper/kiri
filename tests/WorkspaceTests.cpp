@@ -29,6 +29,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <stdexcept>
 #include <signal.h>
 #include <sys/stat.h>
@@ -164,7 +165,7 @@ struct WorkspaceTestAccess {
         w->fSidebarSplit->SetItemCollapsed(0,true);w->fTerminalSplit->SetItemCollapsed(1,true);w->UpdateIfNeeded();w->Unlock();snooze(100000);CHECK(w->Lock());auto width=second->Target()->Frame().Width();auto caret=second->SendMessage(SCI_GETCURRENTPOS),anchor=second->SendMessage(SCI_GETANCHOR);
         Send(*w,kToggleMinimap);Wait(*w,[&]{return second->Minimap()->Enabled() && !second->Minimap()->IsHidden() && second->Minimap()->Bounds().Height()>20;});w->UpdateIfNeeded();second->Minimap()->Refresh(true);
         CHECK(second->Minimap()->CacheBytes()>0 && second->Minimap()->CacheBytes()<=1024*80*2);CHECK(second->Target()->Frame().Width()<width);
-        auto* map=second->Minimap();map->Navigate(map->Bounds().Height()*.9f);CHECK(second->SendMessage(SCI_GETFIRSTVISIBLELINE)>1000);CHECK(second->SendMessage(SCI_GETCURRENTPOS)==caret && second->SendMessage(SCI_GETANCHOR)==anchor);
+        auto* map=second->Minimap();map->MouseDown(BPoint(40,map->Viewport().top+2));map->MouseMoved(BPoint(40,map->Bounds().Height()*.9f),B_INSIDE_VIEW,nullptr);map->MouseUp(BPoint(40,map->Bounds().Height()*.9f));CHECK(second->SendMessage(SCI_GETFIRSTVISIBLELINE)>1000);CHECK(second->SendMessage(SCI_GETCURRENTPOS)==caret && second->SendMessage(SCI_GETANCHOR)==anchor);
         map->MouseDown(BPoint(40,map->Viewport().top+2));map->MouseMoved(BPoint(40,40),B_INSIDE_VIEW,nullptr);map->MouseUp(BPoint(40,40));CHECK(second->SendMessage(SCI_GETFIRSTVISIBLELINE)<500);
         second->SendMessage(SCI_COLOURISE,0,-1);auto expanded=map->DisplayLines();second->SendMessage(SCI_FOLDLINE,0,SC_FOLDACTION_CONTRACT);map->Refresh(true);CHECK(map->DisplayLines()<expanded);CHECK(editor->SendMessage(SCI_GETLINEVISIBLE,1));second->SendMessage(SCI_FOLDLINE,0,SC_FOLDACTION_EXPAND);
         second->SendMessage(SCI_SETWRAPMODE,SC_WRAP_WORD);Wait(*w,[&]{return second->SendMessage(SCI_WRAPCOUNT,1)>1;});map->Refresh(true);CHECK(map->DisplayLines()>expanded);auto wrapped=map->DisplayLines();second->SendMessage(SCI_SETZOOM,4);Wait(*w,[&]{map->Refresh();return map->DisplayLines()>=wrapped;});
@@ -208,6 +209,39 @@ struct WorkspaceTestAccess {
         std::cout<<"Editing Defaults validation, Preferences preview/Cancel/Apply, document state and restart passed.\n";
     }
     static void MinimapBenchmarks() {
+        {
+            auto* window=new BWindow(BRect(40,40,1050,650),"Minimap layout",B_TITLED_WINDOW,0);auto* editor=new Editor();BLayoutBuilder::Group<>(window,B_VERTICAL,0).Add(editor);
+            EditorSettings settings;settings.minimap=true;editor->ApplySettings(settings);editor->SetText("one\n\nthree");window->Show();CHECK(window->Lock());auto* map=editor->Minimap();
+            auto settle=[&] {window->Unlock();snooze(100000);CHECK(window->Lock());window->UpdateIfNeeded();map->Refresh(true);};
+            settle();CHECK(map->Bounds().Height()>200);auto shortViewport=map->Viewport();
+            // Three lines, including a blank line, stay compact after a resize.
+            CHECK(shortViewport.top==2 && shortViewport.Height()==6);
+            window->ResizeTo(1000,700);settle();CHECK(map->Viewport()==shortViewport);
+            map->Navigate(map->Bounds().bottom);CHECK(editor->SendMessage(SCI_GETFIRSTVISIBLELINE)==0);
+            editor->SetText("");map->Refresh();CHECK(map->Viewport().Height()==2);map->Navigate(-100);CHECK(editor->SendMessage(SCI_GETFIRSTVISIBLELINE)==0);
+
+            std::string text;for(int i=0;i<120;++i) text+="  line "+std::to_string(i)+"\n";editor->SetText(text);settle();
+            auto visible=editor->SendMessage(SCI_LINESONSCREEN);auto markerHeight=map->Viewport().Height();
+            // A click refers to the line drawn there, not a fraction of the panel.
+            map->Navigate(162);CHECK(std::abs(editor->SendMessage(SCI_GETFIRSTVISIBLELINE)+visible/2.0-80)<=.5);
+            // The viewport retains the same scale when the document outgrows the panel.
+            for(int i=120;i<10000;++i) text+="  line "+std::to_string(i)+"\n";editor->SetText(text);settle();
+            CHECK(map->Viewport().Height()==markerHeight);CHECK(map->CacheBytes()<=1024*80*2);
+            editor->SendMessage(SCI_SETSEL,2,6);auto revision=editor->InputRevision();editor->SendMessage(SCI_SETFIRSTVISIBLELINE,4321);map->Refresh();
+            auto marker=map->Viewport();CHECK(marker.top>2 && marker.bottom<map->Bounds().bottom-2);
+            BPoint press(40,(marker.top+marker.bottom)/2);map->MouseDown(press);map->MouseUp(press);CHECK(editor->SendMessage(SCI_GETFIRSTVISIBLELINE)==4321);
+            map->MouseDown(press);BPoint moved(40,press.y+30);map->MouseMoved(moved,B_INSIDE_VIEW,nullptr);auto dragged=editor->SendMessage(SCI_GETFIRSTVISIBLELINE);CHECK(dragged>4321);map->MouseUp(moved);CHECK(editor->SendMessage(SCI_GETFIRSTVISIBLELINE)==dragged);
+            map->MouseDown(BPoint(40,map->Viewport().top+2));map->MouseMoved(BPoint(40,map->Bounds().bottom+20),B_OUTSIDE_VIEW,nullptr);
+            CHECK(editor->SendMessage(SCI_GETFIRSTVISIBLELINE)==map->DisplayLines()-visible);CHECK(std::abs(map->Viewport().bottom-(map->Bounds().bottom-2))<.01);
+            map->MouseUp(BPoint(40,-20));CHECK(editor->SendMessage(SCI_GETFIRSTVISIBLELINE)==0);
+            map->MouseDown(BPoint(40,162));auto clicked=editor->SendMessage(SCI_GETFIRSTVISIBLELINE);CHECK(std::abs(clicked+visible/2.0-80)<=.5);map->MouseUp(BPoint(40,162));CHECK(editor->SendMessage(SCI_GETFIRSTVISIBLELINE)==clicked);
+            // Scrolling past the last full page shrinks the marker to the remaining lines.
+            editor->SendMessage(SCI_SETFIRSTVISIBLELINE,map->DisplayLines()-1);map->Refresh();CHECK(map->Viewport().Height()==2);
+            press=BPoint(40,map->Viewport().top+1);map->MouseDown(press);map->MouseUp(press);CHECK(editor->SendMessage(SCI_GETFIRSTVISIBLELINE)==map->DisplayLines()-1);
+            CHECK(editor->SendMessage(SCI_GETANCHOR)==2 && editor->SendMessage(SCI_GETCURRENTPOS)==6);CHECK(editor->InputRevision()==revision && editor->Matches(text) && !editor->Dirty());
+            editor->SetText("one\n\nthree");map->Refresh();CHECK(map->Viewport()==shortViewport);
+            settings.minimap=false;editor->ApplySettings(settings);CHECK(map->CacheBytes()==0);window->Quit();
+        }
         auto resident=[] {ssize_t cookie=0;area_info area{};uint64_t total=0;while(get_next_area_info(getpid(),&cookie,&area)==B_OK) total+=area.ram_size;return total;};
         for(size_t size:{size_t(8192),size_t(8*1024*1024),size_t(200*1024*1024)}) {
             auto* window=new BWindow(BRect(40,40,1050,650),"Minimap benchmark",B_TITLED_WINDOW,0);auto* editor=new Editor();BLayoutBuilder::Group<>(window,B_VERTICAL,0).Add(editor);window->Show();CHECK(window->Lock());

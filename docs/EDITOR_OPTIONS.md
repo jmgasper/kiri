@@ -121,20 +121,25 @@ Guide color comes from the theme's editable `border` role.
 
 Use **View → Minimap** or the checkbox in Editing Defaults. The choice persists
 and applies to editor views. Each pane has its own overview and viewport marker,
-following that pane's folding, wrapping, zoom and scrolling. Click to move to a
-distant region or drag the marker to scroll while preserving the caret and
-selection. Turning it off frees the cell cache and returns 96 pixels to editing.
+following that pane's folding, wrapping, zoom and scrolling. Display lines use a
+fixed two-pixel spacing: short files leave empty space below, and longer files
+scroll through the overview with the editor. Click a location in the overview
+to center that region in the editor, or drag the marker to scroll across the
+document while preserving the caret and selection. Turning it off frees the
+cell cache and returns 96 pixels to editing.
 
 The overview samples the existing Scintilla document; it does not create another
 text buffer, lexer or layout. It draws text occupancy in available lexical
-colors, with at most 1024 rows and 80 columns, reading at most 256 bytes per
-sampled line. Text that has not been styled yet uses the available base color;
-later style notifications refresh it. Semantic indicators are not sampled.
+colors, with at most 1024 consecutive display rows and 80 columns, reading at
+most 256 bytes per sampled line. Text that has not been styled yet uses the
+available base color; later style notifications refresh it. Semantic indicators
+are not sampled.
 
 The cell cache is capped at 160 KiB per view, plus the small palette and native
 widget overhead. A 150 ms timer updates visible views; content is resampled when
-text, styling, indentation or display layout changes. Scroll updates can reuse
-the content cache. Above 32 MiB or 500,000 document lines, a visible
+text, styling, indentation, display layout or the sampled line range changes.
+Scroll updates reuse the content cache while its line range stays the same.
+Above 32 MiB or 500,000 document lines, a visible
 **Minimap paused** message replaces the overview and the cell cache is released.
 The editor remains usable. See [native measurements](PERFORMANCE.md#minimap).
 
@@ -143,9 +148,10 @@ The editor remains usable. See [native measurements](PERFORMANCE.md#minimap).
 Native checks cover tabs and spaces in one workspace, nested rules, invalid
 configuration, overrides, shared panes, Save As, Preferences preview/Cancel/Apply,
 session persistence and unchanged document state. Guide checks use three installed
-font families, sizes 10/18/26 and zoom levels -2/0/3. Minimap checks cover distant
-click/drag navigation, folds, wrapping, zoom, edits, width recovery and bounded
-small/8 MiB/200 MiB behavior. Live mouse and keyboard checks exercised the dialogs,
+font families, sizes 10/18/26 and zoom levels -2/0/3. Minimap checks cover compact
+short files, resize stability, line-aligned clicks, distant dragging, folds,
+wrapping, zoom, edits, width recovery and bounded small/8 MiB/200 MiB behavior.
+Live mouse and keyboard checks exercised the dialogs,
 light and dark guides, minimap navigation, Tab/Shift+Tab, newline indentation and
 undo in JavaScript and Makefiles.
 
