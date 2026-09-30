@@ -42,6 +42,10 @@ void Processes() {
     std::atomic<bool> cancel{true};options={};options.cancel=&cancel;
     result=RunProcess({"sleep","10"},options);CHECK(result.cancelled);
     result=RunProcess({"kiri-a-command-that-does-not-exist"});CHECK(result.exitCode==127);
+    // A killed child is reaped within the bound (a blocked one is left to a reaper thread).
+    auto child=fork();if(child==0) { pause();_exit(0); }
+    CHECK(child>0);kill(child,SIGKILL);int status=0;start=std::chrono::steady_clock::now();
+    CHECK(ReapKilledChild(child,status));CHECK(std::chrono::steady_clock::now()-start<std::chrono::seconds(1));
 }
 void Files() {
     Temporary t;auto path=fs::path(t.path)/"a 'file'.cpp";

@@ -94,9 +94,9 @@ private:BTextControl* fText;BMessenger fTarget;uint32 fCommand;
 };
 class SearchWindow:public BWindow {
 public:
-    SearchWindow(BWindow* owner,std::string root,std::shared_ptr<ProjectIndex> index,bool search,const Theme& theme,bool preview)
+    SearchWindow(BWindow* owner,std::string root,std::shared_ptr<ProjectIndexSlot> slot,bool search,const Theme& theme,bool preview)
         :BWindow(BRect(0,0,700,420),search?"Search Project":"Open Quickly",B_TITLED_WINDOW_LOOK,B_FLOATING_APP_WINDOW_FEEL,B_AUTO_UPDATE_SIZE_LIMITS),
-        fTarget(owner),fRoot(std::move(root)),fIndex(std::move(index)),fSearch(search),fTheme(theme) {
+        fTarget(owner),fRoot(std::move(root)),fSlot(std::move(slot)),fIndex(fSlot->Get()),fSearch(search),fTheme(theme) {
         // BTextControl also invokes when edited text loses focus. Accept only
         // explicit Enter presses, so moving to another field cannot open a result.
         fQuery=new BTextControl("query","", "",nullptr);fQuery->SetModificationMessage(new BMessage(kQueryChanged));
@@ -142,7 +142,10 @@ public:
         }
         else if(message->what==kPromptCancel) PostMessage(B_QUIT_REQUESTED);
         else if(message->what==kQueryChanged || message->what==kProjectUpdated) {
-            if(message->what==kProjectUpdated) fIndex=std::make_shared<ProjectIndex>();
+            // Project search reads files again for every update; a growing
+            // index snapshot only concerns quick-open.
+            if(message->what==kProjectUpdated && fSearch && message->GetBool("index_only",false)) return;
+            if(message->what==kProjectUpdated) fIndex=fSlot->Get();
             fJobs->Cancel("query");
             ++fGeneration;fMatches.clear();fRows.clear();while(auto* item=fResults->RemoveItem(int32(0))) delete item;fStatus->SetText("Searching disk…");BMessage request(kProjectSearch);fTimer=std::make_unique<BMessageRunner>(BMessenger(this),&request,120000,1);
         } else if(message->what==kProjectSearch) Query();
@@ -173,7 +176,9 @@ private:
         auto options=Options();auto generation=++fGeneration;auto root=fRoot;auto index=fIndex;bool search=fSearch;
         fStatus->SetText(search?"Searching files on disk…":"Finding paths…");
         fJobs->Submit([this,options,generation,root,index,search](const auto& cancel) mutable {
-            if(search || index->paths.empty()) index=std::make_shared<ProjectIndex>(IndexProject(root,&cancel,500000,options.includeIgnored));
+            // Quick-open uses the workspace index, including a partial one while
+            // a large project is still being indexed, instead of walking again.
+            if(search || (index->paths.empty() && !index->partial)) index=std::make_shared<ProjectIndex>(IndexProject(root,&cancel,500000,options.includeIgnored));
             SearchResult result;
             if(search) result=SearchProject(root,*index,options,&cancel);
             else for(auto& path:QuickOpen(*index,options.query)) result.matches.push_back({path,"",1,1,0,0,{}});
@@ -190,12 +195,13 @@ private:
                 if(!fRows.empty()) fResults->Select(search?1:0);
                 std::string status=search?"Disk only · "+result.Summary():std::to_string(fMatches.size())+" files";
                 if(index->truncated) status+=" · index limit: 500,000 files";
+                if(index->partial) status+=" · indexing project…";
                 if(!index->error.empty()) status+=" · "+index->error;
                 fStatus->SetText(status.c_str());fStatus->SetToolTip(status.c_str());
             };
         },"query",[this,generation](const std::string& error){if(generation==fGeneration) fStatus->SetText(error.c_str());});
     }
-    BMessenger fTarget;std::string fRoot;std::shared_ptr<ProjectIndex> fIndex;bool fSearch;Theme fTheme;
+    BMessenger fTarget;std::string fRoot;std::shared_ptr<ProjectIndexSlot> fSlot;std::shared_ptr<ProjectIndex> fIndex;bool fSearch;Theme fTheme;
     BTextControl* fQuery;BListView* fResults;BStringView* fStatus;
     BTextControl *fFolders=nullptr,*fInclude=nullptr,*fExclude=nullptr,*fReplacement=nullptr;
     BCheckBox *fCase=nullptr,*fRegex=nullptr,*fWord=nullptr,*fIgnored=nullptr;
@@ -212,6 +218,8 @@ Workspace::Workspace(const std::string& settingsDirectory,bool restoreSession,co
     fLanguageTools.Load(fSettings);
     try { auto data=ReadFile(fSettings+"/search-history.json",nullptr,128*1024);if(data.ok()) { auto history=Json::parse(data.bytes);for(const auto& item:history) { if(item.is_string() && fRecentQueries.size()<20) fRecentQueries.push_back(item.get<std::string>()); } } }catch(...) {}
     fJobs=std::make_unique<AsyncQueue>(BMessenger(this),2);
+    fBrowseJobs=std::make_unique<AsyncQueue>(BMessenger(this),2);
+    fProjectJobs=std::make_unique<AsyncQueue>(BMessenger(this),1);
     fLoaderFactory=std::make_unique<Editor>();
     fRecoveryDirectory=fSessionDirectory+"/recovery";create_directory(fRecoveryDirectory.c_str(),0700);
     fSessionToken=std::to_string(time(nullptr))+"-"+std::to_string(getpid())+"-"+std::to_string(system_time());
@@ -288,8 +296,13 @@ Workspace::~Workspace() {
     if(fLanguageToolsWindow.IsValid()) fLanguageToolsWindow.SendMessage(B_QUIT_REQUESTED);
     fDetachTimer.reset();fLanguageTimer.reset();for(auto& entry:fServers) if(entry.second.client) entry.second.client->Stop();fServers.clear();
     fPulse.reset();fRecoveryTimer.reset();fRecoveryJobs.reset();
+    // A project walk or listing blocked on a slow volume never holds the
+    // window open: every lane is cancelled together and waits a bounded time.
+    for(auto* queue:{fProjectJobs.get(),fBrowseJobs.get(),fJobs.get()}) if(queue) queue->Stop();
+    if(fProjectJobs) fProjectJobs->StopAndWait();fProjectJobs.reset();
+    if(fBrowseJobs) fBrowseJobs->StopAndWait();fBrowseJobs.reset();
     // Retired servers finish on this queue and can post during shutdown. Keep
-    // the queue pointer valid until those workers have joined.
+    // the queue pointer valid until those workers have returned.
     if(fJobs) fJobs->StopAndWait();fJobs.reset();
 }
 void Workspace::WindowActivated(bool active) {
@@ -330,7 +343,7 @@ void Workspace::UpdateStatus() {
     if(fSessionDirectory!=fSettings) {
         auto title=d?d->name+" — Kiri":std::string("Kiri");if(title!=Title()) SetTitle(title.c_str());
     }
-    if(!d) { Notice(fProject.empty()?"Open a folder to begin":fProject+" · "+std::to_string(fIndex->paths.size())+" indexed files");return; }
+    if(!d) { Notice(fProject.empty()?"Open a folder to begin":fProject+" · "+(fIndexRunning?"indexing… ":"")+std::to_string(fIndex->paths.size())+" indexed files");return; }
     std::string status=d->path.empty()?d->name:d->path;
     if(d->saving) status+="  ·  Saving…";
     else if(d->external) status+="  ·  Changed on disk — compare, reload, or keep editing";
@@ -375,26 +388,30 @@ void Workspace::OpenProject(const std::string& input) {
         for(auto& window:fSearchWindows) if(window.IsValid()) window.SendMessage(B_QUIT_REQUESTED);fSearchWindows.clear();
         if(fEditWindow.IsValid() && !fApplyingEdit) fEditWindow.SendMessage(B_QUIT_REQUESTED);
     }
-    fProject=path;++fGeneration;fIndex=std::make_shared<ProjectIndex>();fGitRoot.clear();fExplorer->Clear();fGit->SetRepository("");
+    fProject=path;++fGeneration;fGitRoot.clear();fExplorer->Clear();fGit->SetRepository("");
+    // Abandon the previous project's walks and listings; the lanes are free for this one.
+    fProjectJobs->CancelAll();fBrowseJobs->CancelAll();fIndexRunning=fIndexStale=false;++fIndexSerial;
+    auto empty=std::make_shared<ProjectIndex>();empty->partial=true;fIndex=empty;fIndexSlot->Set(empty);
     stop_watching(BMessenger(this));fWatchedNodes.clear();fProjectMonitor=std::make_shared<ProjectMonitor>(path);fMonitorPending=false;fMonitorPriority.clear();
     SetTitle((fs::path(path).filename().string()+" — Kiri").c_str());
     Notice("Opening project…");auto generation=fGeneration;
     LoadDirectory(path);
-    auto indexSerial=++fIndexSerial;
-    fJobs->Submit([this,path,generation,indexSerial](const auto& cancel) {
-        auto index=std::make_shared<ProjectIndex>(IndexProject(path,&cancel));auto result=GitRepository(path).Run({"rev-parse","--show-toplevel"},&cancel);
+    // Repository discovery is quick and must not wait for a large walk.
+    fJobs->Submit([this,path,generation](const auto& cancel) {
+        auto result=GitRepository(path).Run({"rev-parse","--show-toplevel"},&cancel);
         auto root=result.ok()?result.output:std::string();while(!root.empty() && (root.back()=='\n' || root.back()=='\r')) root.pop_back();
-        return [this,index,root,result,generation,indexSerial] {
+        return [this,root,result,generation] {
             if(generation!=fGeneration) return;
-            if(indexSerial==fIndexSerial) fIndex=index;fGitRoot=root;fGit->SetRepository(root,result.ok()?"":result.diagnostic());UpdateStatus();SaveSettings();PollProject();
+            fGitRoot=root;fGit->SetRepository(root,result.ok()?"":result.diagnostic());UpdateStatus();SaveSettings();
         };
     },"project");
+    RefreshIndex();
     // A project change gets a fresh shell without interrupting existing tabs.
     if(changed && !fTerminal->Empty()) NewTerminal(fTerminal->OwnsFocus());
 }
 void Workspace::LoadDirectory(const std::string& path) {
     auto generation=fGeneration;bool root=path==fProject;
-    fJobs->Submit([this,path,generation,root](const auto& cancel) {
+    fBrowseJobs->Submit([this,path,generation,root](const auto& cancel) {
         auto result=ListDirectory(path,&cancel);
         return [this,result=std::move(result),path,generation,root] {
             if(generation!=fGeneration) return;
@@ -403,11 +420,39 @@ void Workspace::LoadDirectory(const std::string& path) {
     });
 }
 void Workspace::RefreshIndex() {
-    if(fProject.empty()) return;auto path=fProject;auto generation=fGeneration;auto serial=++fIndexSerial;
-    fJobs->Submit([this,path,generation,serial](const auto& cancel) {
-        auto index=std::make_shared<ProjectIndex>(IndexProject(path,&cancel));
-        return [this,index,generation,serial] { if(generation==fGeneration && serial==fIndexSerial) { fIndex=index;RefreshSearchWindows(); } };
-    },"index refresh");
+    if(fProject.empty()) return;
+    // One walk at a time. A request during a walk runs once after it, so a
+    // slow volume is never rescanned in a loop and nothing waits behind it.
+    if(fIndexRunning) { fIndexStale=true;return; }
+    fIndexRunning=true;fIndexStale=false;
+    auto path=fProject;auto generation=fGeneration;auto serial=++fIndexSerial;auto monitor=fProjectMonitor;auto post=fProjectJobs->Poster();
+    fProjectJobs->Submit([this,path,generation,serial,monitor,post](const auto& cancel) {
+        // Changes older than this walk are in it; the change scan only needs to
+        // report newer ones in directories it has not listed before.
+        if(monitor) monitor->SetIndexTime(int64_t(time(nullptr))-2);
+        auto progress=[this,post,generation,serial](const ProjectIndex& partial) {
+            auto snapshot=std::make_shared<ProjectIndex>(partial);
+            post([this,snapshot,generation,serial] { if(generation==fGeneration && serial==fIndexSerial && fIndexRunning) SetIndex(snapshot,false); });
+        };
+        auto index=std::make_shared<ProjectIndex>(IndexProject(path,&cancel,500000,false,progress));
+        return [this,index,generation,serial] {
+            if(generation!=fGeneration || serial!=fIndexSerial) return;
+            fIndexRunning=false;SetIndex(index,true);
+            if(fIndexStale) RefreshIndex();else PollProject();
+        };
+    },"index",[this,generation,serial](const std::string& error) {
+        if(generation!=fGeneration || serial!=fIndexSerial) return;
+        fIndexRunning=false;Notice("Project index: "+error);if(fIndexStale) RefreshIndex();
+    });
+}
+void Workspace::SetIndex(std::shared_ptr<ProjectIndex> index,bool complete) {
+    fIndex=std::move(index);fIndexSlot->Set(fIndex);
+    // Partial snapshots only refresh quick-open; project search re-reads files.
+    RefreshSearchWindows(!complete);
+    if(!Current()) UpdateStatus();
+}
+void Workspace::DrainJobs() {
+    for(auto* queue:{fJobs.get(),fBrowseJobs.get(),fProjectJobs.get(),fRecoveryJobs.get()}) if(queue) queue->Drain();
 }
 void Workspace::OpenFile(const std::string& input,size_t line,size_t column,bool activate,bool preview,int64 paneID,bool focusEditor) {
     if(fApplyingEdit || EditPathBusy(input)) { Notice("Wait for the project edit to finish before opening this file.");return; }
@@ -610,7 +655,7 @@ void Workspace::ShowFind() {
 }
 void Workspace::Search(bool search) {
     if(fProject.empty()) { Notice("Open a project folder first.");return; }
-    auto* window=new SearchWindow(this,fProject,fIndex,search,fEditorSettings.Colors(),fPreviewTabs);fSearchWindows.emplace_back(window);
+    auto* window=new SearchWindow(this,fProject,fIndexSlot,search,fEditorSettings.Colors(),fPreviewTabs);fSearchWindows.emplace_back(window);
 }
 void Workspace::PromptLine() { new PromptWindow(this,"Go to Line","Line or line:column",kGoToResult,fEditorSettings.Colors()); }
 void Workspace::CopyPermalink() {
@@ -846,7 +891,7 @@ void Workspace::MessageReceived(BMessage* message) {
         case kQuitApplication:be_app->PostMessage(B_QUIT_REQUESTED);break;
         case kShowLauncher:be_app->PostMessage(kShowLauncher);break;
         case kActivateWorkspace:Activate();break;
-        case kWorkDone:fJobs->Drain();if(fRecoveryJobs) fRecoveryJobs->Drain();break;
+        case kWorkDone:DrainJobs();break;
         case kRecoveryTick:RecoveryTick();break;
         case kPulse:Pulse();break;
         case kOpenProject: {

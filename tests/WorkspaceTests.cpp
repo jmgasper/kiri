@@ -1,5 +1,6 @@
 // Real Haiku windows and Scintilla buffers, with isolated files and settings.
 #include "ui/Workspace.h"
+#include "core/Process.h"
 #include "ui/Editor.h"
 #include "ui/TabStrip.h"
 #include "ui/TerminalPanel.h"
@@ -611,6 +612,42 @@ struct WorkspaceTestAccess {
         view->LoadCommitFile(0);view->SetRepository(other);CHECK(!view->fDiff->Model());Wait(*w,[&]{return !view->fHistoryBusy;});CHECK(!view->fDiff->Model());
         CHECK(status==run({"status","--porcelain=v1","-z"}));w->Quit();
     }
+    // Opening a large or slow folder (#1): a project walk blocked in the kernel,
+    // as on an unresponsive network volume, must not delay the tree, the
+    // repository check, opening files or closing the window.
+    static void SlowProject(const std::string& base) {
+        auto root=base+"/slow-project",settings=base+"/slow-settings",outside=base+"/slow-outside.txt";
+        fs::create_directories(root+"/docs");std::ofstream(root+"/docs/note.md")<<"# Note\n";std::ofstream(outside)<<"already open\n";
+        for(int i=0;i<60;++i) fs::create_directories(root+"/tree/"+std::to_string(i));
+        ProcessOptions options;options.directory=root;CHECK(RunProcess({"git","init","-q"},options).ok());
+        auto* w=new Workspace(settings,false);w->Show();CHECK(w->Lock());
+        Open(*w,outside);
+        // The job ignores cancellation, like a thread waiting on a stalled read.
+        auto gate=std::make_shared<std::atomic<bool>>(false),entered=std::make_shared<std::atomic<bool>>(false),left=std::make_shared<std::atomic<bool>>(false);
+        w->fProjectJobs->Submit([gate,entered,left](const auto&) { *entered=true;while(!*gate) snooze(10000);*left=true;return AsyncQueue::Callback(); });
+        Wait(*w,[&]{return entered->load();});
+        w->OpenProject(root);
+        Wait(*w,[&]{return w->fExplorer->FullListCountItems()>=2 && !w->fGitRoot.empty();});
+        CHECK(w->fIndexRunning && w->fIndex->partial && w->fIndex->paths.empty());
+        auto started=system_time();Open(*w,root+"/docs/note.md");CHECK(system_time()-started<3000000);
+        CHECK(w->Current()->editor->Matches("# Note\n"));
+        // Change reports during a walk coalesce into one later walk.
+        for(int i=0;i<5;++i) w->RefreshIndex();
+        CHECK(w->fIndexStale && w->fProjectJobs->Pending()<=3);
+        // Quick-open waits for the shared index instead of walking again.
+        w->Search(false);auto quick=w->fSearchWindows.back();
+        Wait(*w,[&]{if(quick.LockTargetWithTimeout(100000)!=B_OK) return false;BLooper* looper=nullptr;quick.Target(&looper);
+            auto* status=dynamic_cast<BStringView*>(static_cast<BWindow*>(looper)->FindView("search status"));bool indexing=status && std::string(status->Text()).find("indexing project")!=std::string::npos;looper->Unlock();return indexing;});
+        quick.SendMessage(B_QUIT_REQUESTED);
+        started=system_time();w->Quit();auto closing=system_time()-started;
+        CHECK(closing<AsyncQueue::kShutdownWait+1500000);CHECK(!left->load());
+        // The detached worker finishes its job and exits once the read returns.
+        *gate=true;for(int i=0;i<300 && !*left;++i) snooze(10000);CHECK(left->load());
+        // Without the blocked walk, the index completes and the project opens normally.
+        w=new Workspace(settings+"-2",false);w->Show();CHECK(w->Lock());w->OpenProject(root);
+        Wait(*w,[&]{return !w->fIndexRunning && !w->fIndex->partial && w->fIndex->paths.size()==1;});CHECK(w->fIndex->paths[0]=="docs/note.md");
+        Open(*w,root+"/docs/note.md");w->Quit();
+    }
     static void SearchInput(const std::string& base) {
         auto root=base+"/search-input-project";fs::create_directories(root);
         auto file=root+"/example.txt";{std::ofstream(file)<<"old here\nold there\n";}
@@ -872,6 +909,6 @@ int main(int argc,char** argv) {
     }
     BApplication application("application/x-vnd.Kiri-workspace-unit-tests");
     char folder[]="/tmp/kiri-workspace-XXXXXX";auto* root=mkdtemp(folder);if(!root) return 1;
-    try { if(argc==2 && std::string(argv[1])=="--editor-options") {kiri::WorkspaceTestAccess::EditorOptions(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::EditingDefaults(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::MinimapBenchmarks();fs::remove_all(root);std::cout<<"Passed "<<checks<<" editor options workspace checks.\n";return 0;}if(argc==2 && std::string(argv[1])=="--analysis") {kiri::WorkspaceTestAccess::Analysis(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" analysis workspace checks.\n";return 0;}if(argc==3 && std::string(argv[1])=="--real-analysis") {kiri::WorkspaceTestAccess::RealAnalysis(kiri::CanonicalPath(root),argv[2]);fs::remove_all(root);std::cout<<"Passed "<<checks<<" real analysis checks.\n";return 0;}kiri::WorkspaceTestAccess::EditorOptions(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::EditingDefaults(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::MinimapBenchmarks();kiri::WorkspaceTestAccess::Themes(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::AnalysisRendering();kiri::WorkspaceTestAccess::Analysis(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::RefreshAndDiff(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::SearchInput(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
+    try { if(argc==2 && std::string(argv[1])=="--editor-options") {kiri::WorkspaceTestAccess::EditorOptions(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::EditingDefaults(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::MinimapBenchmarks();fs::remove_all(root);std::cout<<"Passed "<<checks<<" editor options workspace checks.\n";return 0;}if(argc==2 && std::string(argv[1])=="--analysis") {kiri::WorkspaceTestAccess::Analysis(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" analysis workspace checks.\n";return 0;}if(argc==2 && std::string(argv[1])=="--slow-project") {kiri::WorkspaceTestAccess::SlowProject(kiri::CanonicalPath(root));fs::remove_all(root);std::cout<<"Passed "<<checks<<" slow project checks.\n";return 0;}if(argc==3 && std::string(argv[1])=="--real-analysis") {kiri::WorkspaceTestAccess::RealAnalysis(kiri::CanonicalPath(root),argv[2]);fs::remove_all(root);std::cout<<"Passed "<<checks<<" real analysis checks.\n";return 0;}kiri::WorkspaceTestAccess::EditorOptions(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::EditingDefaults(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::MinimapBenchmarks();kiri::WorkspaceTestAccess::Themes(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::AnalysisRendering();kiri::WorkspaceTestAccess::Analysis(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::RefreshAndDiff(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::SearchInput(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SlowProject(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::Run(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));kiri::WorkspaceTestAccess::DragTabs(kiri::CanonicalPath(root));kiri::WorkspaceTestAccess::SearchAndEdits(kiri::CanonicalPath(root),kiri::CanonicalPath(argv[0]));fs::remove_all(root);std::cout<<"Passed "<<checks<<" workspace checks.\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<" (test files: "<<root<<")\n";return 1; }
 }

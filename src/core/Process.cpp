@@ -6,6 +6,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 
 extern char** environ;
@@ -85,16 +86,22 @@ ProcessResult RunProcess(const std::vector<std::string>& args, const ProcessOpti
     Nonblock(out[0]); Nonblock(err[0]); Nonblock(in[1]);
     size_t written = 0;
     if (options.input.empty()) { close(in[1]); in[1] = -1; }
-    auto start = std::chrono::steady_clock::now();
-    bool reaped = false, killed = false;
+    auto start = std::chrono::steady_clock::now(), killedAt = start;
+    bool reaped = false, killed = false, abandoned = false;
     int status = 0;
     while (!reaped || out[0] >= 0 || err[0] >= 0) {
         if (!killed) {
             result.cancelled = options.cancel && options.cancel->load();
             result.timedOut = std::chrono::steady_clock::now() - start > options.timeout;
             if (result.cancelled || result.timedOut || result.truncated) {
-                kill(-pid, SIGKILL); kill(pid, SIGKILL); killed = true;
+                kill(-pid, SIGKILL); kill(pid, SIGKILL); killed = true; killedAt = std::chrono::steady_clock::now();
             }
+        } else if (!reaped && std::chrono::steady_clock::now() - killedAt > std::chrono::seconds(1)) {
+            // Still blocked in the kernel after SIGKILL: stop waiting for it.
+            abandoned = !ReapKilledChild(pid, status, std::chrono::milliseconds(0));
+            if (out[0] >= 0) { close(out[0]); out[0] = -1; }
+            if (err[0] >= 0) { close(err[0]); err[0] = -1; }
+            break;
         }
         pollfd fds[] = {{out[0], POLLIN, 0}, {err[0], POLLIN, 0}, {in[1], POLLOUT, 0}};
         poll(fds, 3, 25);
@@ -131,9 +138,19 @@ ProcessResult RunProcess(const std::vector<std::string>& args, const ProcessOpti
         }
     }
     if (in[1] >= 0) close(in[1]);
-    result.exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+    result.exitCode = abandoned ? 128 + SIGKILL : WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
     if (result.exitCode == 127 && result.error.empty()) result.error = "Cannot run " + args[0] + ". Check that it is installed.";
     if (result.exitCode == 126 && result.error.empty()) result.error = "Cannot access working directory.";
     return result;
+}
+bool ReapKilledChild(int pid, int& status, std::chrono::milliseconds wait) {
+    auto until = std::chrono::steady_clock::now() + wait;
+    do {
+        auto waited = waitpid(pid, &status, WNOHANG);
+        if (waited == pid || (waited < 0 && errno == ECHILD)) return true;
+        if (wait.count() > 0) poll(nullptr, 0, 10);
+    } while (std::chrono::steady_clock::now() < until);
+    std::thread([pid] { int ignored = 0; while (waitpid(pid, &ignored, 0) < 0 && errno == EINTR) {} }).detach();
+    return false;
 }
 }

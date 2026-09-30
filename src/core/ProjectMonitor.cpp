@@ -7,6 +7,10 @@ namespace kiri {
 namespace {
 void Mix(uint64_t& hash,std::string_view text) { for(unsigned char c:text) { hash^=c;hash*=1099511628211ULL; }hash^=255;hash*=1099511628211ULL; }
 }
+bool ProjectMonitor::Node(const std::string& path,std::pair<uint64_t,uint64_t>& node) const {
+    auto found=fDirectoryStamps.find(path);if(found==fDirectoryStamps.end()) return false;
+    node={found->second.device,found->second.inode};return true;
+}
 ProjectChanges ProjectMonitor::Poll(const std::vector<std::string>& priority,const std::atomic<bool>* cancel,size_t budget) {
     ProjectChanges result;auto started=std::chrono::steady_clock::now();std::set<std::string> visited;
     for(auto it=priority.rbegin();it!=priority.rend();++it) if(*it==fRoot || fStates.count(*it)) {
@@ -20,31 +24,43 @@ ProjectChanges ProjectMonitor::Poll(const std::vector<std::string>& priority,con
         auto previous=fStates.find(path);
         if(!listing.error.empty()) {
             if(previous!=fStates.end()) { result.changedDirectories.push_back(path);fStates.erase(previous);result.contents=true; }
-            if(path!=fRoot) fKnown.erase(path);
+            fFailed.insert(path);
+            if(path!=fRoot) { fKnown.erase(path);fDirectoryStamps.erase(path); }
             if(path==fRoot) { fPending.push_back(path);fQueued.insert(path); }
             continue;
         }
+        if(path==fRoot && !fDirectoryStamps.count(fRoot)) { auto stamp=StatFile(fRoot);if(stamp.exists) fDirectoryStamps[fRoot]=stamp; }
+        // The newest modification in this directory itself: its own entry
+        // (names added or removed) and its files. Subdirectories judge their own.
+        int64_t newest=LLONG_MIN;
+        if(auto own=fDirectoryStamps.find(path);own!=fDirectoryStamps.end()) newest=own->second.seconds;
         for(auto& entry:listing.entries) {
             if(entry.name==".git" || entry.name==".hg" || entry.name==".svn") continue;
             Mix(state.names,entry.name);Mix(state.names,entry.directory?"directory":"file");Mix(state.names,entry.symlink?"link":"node");
             if(entry.directory && !entry.symlink) {
+                if(entry.stamp.exists) fDirectoryStamps[entry.path]=entry.stamp;
                 if(fKnown.count(entry.path) || fKnown.size()<50000) { if(!fQueued.count(entry.path) && !visited.count(entry.path)) { fPending.push_back(entry.path);fQueued.insert(entry.path);fKnown.insert(entry.path); } }
                 else result.limited=true;
             } else if(!entry.symlink) {
-                auto stamp=StatFile(entry.path);Mix(state.contents,entry.name);
+                // The listing's own metadata read; no second stat per file.
+                const auto& stamp=entry.stamp;Mix(state.contents,entry.name);
                 for(auto value:{stamp.inode,stamp.size,uint64_t(stamp.seconds),uint64_t(stamp.nanoseconds)}) Mix(state.contents,std::to_string(value));
                 if(entry.name==".gitignore") Mix(state.names,std::to_string(state.contents));
+                if(stamp.exists) newest=std::max(newest,stamp.seconds);
             }
         }
         if(previous!=fStates.end()) {
             if(previous->second.names!=state.names) result.changedDirectories.push_back(path);
             if(previous->second.contents!=state.contents || previous->second.names!=state.names) result.contents=true;
-        } else if(fInitialized) { result.changedDirectories.push_back(path);result.contents=true; }
+        } else if(fFailed.count(path) || newest>=fIndexedSince.load()) { result.changedDirectories.push_back(path);result.contents=true; }
+        fFailed.erase(path);
         fStates[path]=state;fPending.push_back(path);fQueued.insert(path);
         if(std::chrono::steady_clock::now()-started>std::chrono::milliseconds(100)) break;
     }
-    for(auto& entry:fStates) result.directories.push_back(entry.first);
-    fInitialized=true;
+    for(auto& entry:fStates) {
+        result.directories.push_back(entry.first);
+        std::pair<uint64_t,uint64_t> node{0,0};Node(entry.first,node);result.nodes.push_back(node);
+    }
     return result;
 }
 }

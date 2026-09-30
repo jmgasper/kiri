@@ -15,6 +15,7 @@
 #include <TranslationUtils.h>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sys/stat.h>
 
 namespace kiri {
@@ -186,11 +187,26 @@ void Workspace::OpenExternalBackups(const std::string& directory) {
 }
 void Workspace::PollProject() {
     if(!fProjectMonitor || fMonitorPending) return;fMonitorPending=true;auto monitor=fProjectMonitor;auto generation=fGeneration;auto priority=std::move(fMonitorPriority);fMonitorPriority.clear();
-    fJobs->Submit([this,monitor,generation,priority](const auto& cancel) {
+    // Open documents' folders and expanded tree branches are watched first.
+    std::vector<std::string> extra;
+    for(auto& d:fDocuments) if(!d->path.empty()) extra.push_back(fs::path(d->path).parent_path().string());
+    for(auto& path:fExplorer->LoadedDirectories()) extra.push_back(path);
+    fProjectJobs->Submit([this,monitor,generation,priority,extra=std::move(extra)](const auto& cancel) {
         auto changes=monitor->Poll(priority,&cancel);
-        return [this,monitor,generation,changes=std::move(changes)] {
+        // Resolve watch targets here: the window thread never reads directory
+        // metadata, which can be slow on a network volume.
+        auto watches=std::make_shared<WatchList>();std::set<std::pair<uint64_t,uint64_t>> seen;
+        auto add=[&](const std::string& path,std::pair<uint64_t,uint64_t> node) { if(watches->size()<512 && seen.insert(node).second) watches->emplace_back(path,node); };
+        for(const auto& path:extra) {
+            if(cancel || watches->size()>=512) break;
+            std::pair<uint64_t,uint64_t> node;
+            if(!monitor->Node(path,node)) { auto stamp=StatFile(path);if(!stamp.exists) continue;node={stamp.device,stamp.inode}; }
+            add(path,node);
+        }
+        for(size_t i=0;i<changes.directories.size() && watches->size()<512;++i) if(changes.nodes[i].second) add(changes.directories[i],changes.nodes[i]);
+        return [this,monitor,generation,changes=std::move(changes),watches] {
             if(generation!=fGeneration || monitor!=fProjectMonitor) return;fMonitorPending=false;
-            UpdateNodeWatches(changes.directories);
+            UpdateNodeWatches(*watches);
             if(!changes.changedDirectories.empty()) {
                 auto loaded=fExplorer->LoadedDirectories();for(auto& path:changes.changedDirectories) if(std::find(loaded.begin(),loaded.end(),path)!=loaded.end()) LoadDirectory(path);
                 RefreshIndex();
@@ -198,20 +214,19 @@ void Workspace::PollProject() {
             if(changes.contents) { RefreshSearchWindows();fGit->Refresh(); }
             if(changes.limited) Notice("Automatic directory monitoring limit: 50,000 directories. Use Refresh for the remaining paths.");
         };
-    },{},[this,generation](const std::string& error){if(generation==fGeneration) { fMonitorPending=false;Notice(error); }});
+    },"monitor",[this,generation](const std::string& error){if(generation==fGeneration) { fMonitorPending=false;Notice(error); }});
 }
-void Workspace::UpdateNodeWatches(const std::vector<std::string>& directories) {
-    std::vector<std::string> candidates=fExplorer->LoadedDirectories();candidates.insert(candidates.end(),directories.begin(),directories.end());
-    for(auto& d:fDocuments) if(!d->path.empty()) candidates.insert(candidates.begin(),fs::path(d->path).parent_path().string());
+void Workspace::UpdateNodeWatches(const WatchList& directories) {
     std::map<std::pair<uint64_t,uint64_t>,std::string> watched;
-    for(auto& path:candidates) { auto stamp=StatFile(path);if(!stamp.exists) continue;auto key=std::make_pair(stamp.device,stamp.inode);if(watched.size()>=512) break;
+    for(const auto& [path,key]:directories) {
         if(fWatchedNodes.count(key)) watched[key]=path;
-        else { node_ref node{dev_t(stamp.device),ino_t(stamp.inode)};if(watch_node(&node,B_WATCH_DIRECTORY|B_WATCH_STAT|B_WATCH_CHILDREN,BMessenger(this))==B_OK) watched[key]=path; }
+        else { node_ref node{dev_t(key.first),ino_t(key.second)};if(watch_node(&node,B_WATCH_DIRECTORY|B_WATCH_STAT|B_WATCH_CHILDREN,BMessenger(this))==B_OK) watched[key]=path; }
     }
     for(auto& item:fWatchedNodes) if(!watched.count(item.first)) { node_ref node{dev_t(item.first.first),ino_t(item.first.second)};watch_node(&node,B_STOP_WATCHING,BMessenger(this)); }
     fWatchedNodes=std::move(watched);
 }
-void Workspace::RefreshSearchWindows() {
-    for(auto it=fSearchWindows.begin();it!=fSearchWindows.end();) { if(!it->IsValid()) it=fSearchWindows.erase(it);else { it->SendMessage(kProjectUpdated);++it; } }
+void Workspace::RefreshSearchWindows(bool indexOnly) {
+    BMessage update(kProjectUpdated);update.AddBool("index_only",indexOnly);
+    for(auto it=fSearchWindows.begin();it!=fSearchWindows.end();) { if(!it->IsValid()) it=fSearchWindows.erase(it);else { it->SendMessage(&update);++it; } }
 }
 }

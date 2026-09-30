@@ -44,6 +44,39 @@ Project text search returns up to 2,000 matches and skips binary files, symlinks
 and individual files over 32 MiB. Git command output is capped at 32 MiB.
 Git history loads 200 commits per request and can continue to the beginning.
 
+## Large and network folders
+
+Measured September 30, 2026 on the X399 workstation (Threadripper 1950X,
+Haiku x86_64 hrev60097 fork) with the workspace harness. `/Documents` is an SMB
+share mounted through userlandfs, with about a hundred top-level entries and
+many thousands of files below them. A local file was already open, as in
+[issue #1](https://github.com/jmgasper/kiri/issues/1).
+
+| Scenario | Before (develop `2b0c608`) | After |
+| --- | ---: | ---: |
+| Open `Readme.md` 10 s after opening the folder | not open after 45 s | about 1 s (1 s polling) |
+| Open four files after 60 s of indexing | — | 70–176 ms each |
+| Window round trip during indexing (40 samples) | — | under 150 ms |
+| Quit while indexing | — | 44–50 ms |
+| Close with a walk blocked in the kernel (test) | waits for the walk | 2.04 s (bounded) |
+
+Before the change, a debugger report of the stuck harness showed both shared
+workers in `IndexProject` → `ListDirectory` → `lstat`: the initial walk, and a
+second full walk started because the change scan reported every directory it
+discovered for the first time as changed. The file load queued behind them.
+Every entry also cost two metadata reads during listing and a third during the
+change scan, and watch targets were resolved with `stat` on the window thread.
+
+Now document loading, tree listings and project-wide walks use separate workers;
+the project index and change scan share one worker and never run twice at once.
+First-time discovery is not a change, entries cost one read, and watch targets
+come from the scan. Open Quickly uses partial index snapshots (after 0.5 s, then
+every 2 s) instead of walking the project itself. Closing a window cancels all
+workers and waits at most 2 s; a worker blocked in the kernel is left to finish
+on its own, and killed child processes that do not exit within 1 s are reaped
+on a detached thread. Reproduce the blocked-walk check with
+`build-haiku/kiri_workspace_tests --slow-project`.
+
 ## Minimap
 
 Measured September 15, 2026 in the same Haiku beta5 VM with a native editor

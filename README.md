@@ -95,6 +95,10 @@ for project-local versions, other languages, configuration and limits.
   showing and hiding the file tree, terminal and source control workspace.
   External creation, rename and deletion refresh the tree, index and open search
   windows automatically. The refresh icon beside **FILES** is also available.
+  Large or network folders open at once: the tree, Git status and file loading
+  never wait for the project index, which is built in the background one walk
+  at a time. Open Quickly searches the files found so far while it runs, and
+  closing the window never waits for a slow volume.
   The tree and document tabs show Haiku's native icons for source files, text,
   web pages, images, archives and other basic file types, with a generic fallback.
 - Tabs show unsaved dots and close controls. Scroll the tab strip to reveal

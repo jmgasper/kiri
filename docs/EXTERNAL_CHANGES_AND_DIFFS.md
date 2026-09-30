@@ -29,6 +29,15 @@ tracks up to 50,000 directories, skips VCS internals and does not recurse throug
 symlink directories. Failed or unsupported watches still have polling coverage.
 The **FILES** refresh button remains available.
 
+Scanning uses one metadata read per entry, and the scan and project index share
+one background worker, separate from document loading and tree listings. A
+directory listed for the first time is not treated as changed unless something
+in it is newer than the start of the latest index (or it was unreadable
+before), so discovering a large tree never restarts the index. Refresh requests
+made while an index is being built are combined into one walk afterwards.
+Directory metadata for watches is read on that worker, never on the window
+thread.
+
 ## When the buffer has unsaved changes
 
 Kiri leaves your text in place and shows an external-change bar. It first

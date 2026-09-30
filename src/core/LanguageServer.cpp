@@ -1,5 +1,6 @@
 #include "core/LanguageServer.h"
 #include "core/LanguageTools.h"
+#include "core/Process.h"
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
@@ -163,7 +164,7 @@ void RpcProcess::Run(std::vector<std::string> command,std::string directory) {
         if(!fStop) failure=WIFEXITED(status) && WEXITSTATUS(status)==127?"Cannot run "+command[0]+". Install it or choose its command in Edit → Language Tools.":"Language server stopped";
     } catch(const std::exception& error) { failure=error.what(); }
     // Kill the process group as well as the server, including tsserver children.
-    if(pid>0) { kill(-pid,SIGKILL);if(!reaped) { kill(pid,SIGKILL);while(waitpid(pid,&status,0)<0 && errno==EINTR) {} } }
+    if(pid>0) { kill(-pid,SIGKILL);if(!reaped) { kill(pid,SIGKILL);ReapKilledChild(pid,status); } }
     for(int fd:{out[0],out[1],err[0],err[1],in[0],in[1]}) if(fd>=0) close(fd);
     fAlive=false;
     if(!stderrText.empty() && !failure.empty()) failure+="\n"+stderrText;

@@ -48,12 +48,12 @@ void Explorer::AddEntries(const DirectoryResult& listing,FileItem* parent) {
         if(entry.directory) {
             auto found=fListings.find(entry.path);
             if(found!=fListings.end()) { item->loaded=true;AddEntries(found->second,item); }
-            else AddUnder(new FileItem({"Loading…",entry.path,false,false},item->OutlineLevel()+1,true),item);
+            else AddUnder(new FileItem({"Loading…",entry.path,false,false,{}},item->OutlineLevel()+1,true),item);
             if(fExpanded.count(entry.path)) Expand(item);
         }
     }
     if(!listing.error.empty()) {
-        auto* error=new FileItem({listing.error,"",false,false},parent?parent->OutlineLevel()+1:0,true);
+        auto* error=new FileItem({listing.error,"",false,false,{}},parent?parent->OutlineLevel()+1:0,true);
         if(parent) AddUnder(error,parent);else AddItem(error);
     }
 }

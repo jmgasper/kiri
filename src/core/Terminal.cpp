@@ -1,4 +1,5 @@
 #include "core/Terminal.h"
+#include "core/Process.h"
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
@@ -239,7 +240,7 @@ void PtySession::Stop() {
             if(waitpid(fPid,&status,WNOHANG)==fPid) { fPid=-1;break; }
             poll(nullptr,0,10);
         }
-        if(fPid>0) { kill(-fPid,SIGKILL);kill(fPid,SIGKILL);waitpid(fPid,&status,0); }
+        if(fPid>0) { kill(-fPid,SIGKILL);kill(fPid,SIGKILL);ReapKilledChild(fPid,status); }
         fPid=-1;
     }
     if(fMaster>=0) { close(fMaster);fMaster=-1; }

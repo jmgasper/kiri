@@ -26,4 +26,9 @@ struct ProcessOptions {
 // Arguments are passed directly to execve; no shell expansion is performed.
 ProcessResult RunProcess(const std::vector<std::string>& arguments,
     const ProcessOptions& options = {});
+// Waits up to the given time for a killed child. A child blocked in the kernel
+// (for example, on an unresponsive network volume) exits only when that call
+// returns, so it is then reaped on a detached thread instead of blocking the
+// caller. Returns true when the child was reaped here; status is set then.
+bool ReapKilledChild(int pid, int& status, std::chrono::milliseconds wait = std::chrono::milliseconds(1000));
 }

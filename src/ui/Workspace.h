@@ -156,6 +156,8 @@ private:
     void CopyPermalink();
     void LoadDirectory(const std::string& path);
     void RefreshIndex();
+    void SetIndex(std::shared_ptr<ProjectIndex> index,bool complete);
+    void DrainJobs();
     void RestoreSettings(bool restoreSession);
     void RememberRecent(const std::string& path,bool folder);
     void SaveSettings();
@@ -173,8 +175,9 @@ private:
     void UpdateExternalBar();
     void OpenExternalBackups(const std::string& directory);
     void PollProject();
-    void UpdateNodeWatches(const std::vector<std::string>& directories);
-    void RefreshSearchWindows();
+    using WatchList=std::vector<std::pair<std::string,std::pair<uint64_t,uint64_t>>>;
+    void UpdateNodeWatches(const WatchList& directories);
+    void RefreshSearchWindows(bool indexOnly=false);
     void Notice(const std::string& text);
     void FormatDocument(Editor* source);
     void ShowLanguageTools();
@@ -199,7 +202,12 @@ private:
     void AcceptCompletion(Editor* source,const std::string& label);
     void ApplyCompletion(int64 document,int64 serial,CompletionItem item);
     void CancelCompletion();
+    // Three lanes keep interactive work independent of slow volumes: fJobs
+    // opens, saves and checks documents; fBrowseJobs lists tree folders; and
+    // fProjectJobs runs one project-wide walk (index or change scan) at a time.
     std::unique_ptr<AsyncQueue> fJobs;
+    std::unique_ptr<AsyncQueue> fBrowseJobs;
+    std::unique_ptr<AsyncQueue> fProjectJobs;
     std::unique_ptr<Editor> fLoaderFactory;
     std::unique_ptr<AsyncQueue> fRecoveryJobs;
     std::unique_ptr<BFilePanel> fFolderPanel,fOpenPanel,fSavePanel;
@@ -210,6 +218,7 @@ private:
     std::vector<std::string> fMonitorPriority;
     bool fMonitorPending=false;
     int64 fIndexSerial=0;
+    bool fIndexRunning=false,fIndexStale=false;
     std::unique_ptr<BMessageRunner> fRecoveryTimer;
     std::unique_ptr<BMessageRunner> fLanguageTimer;
     std::unique_ptr<BMessageRunner> fDetachTimer;
@@ -254,6 +263,7 @@ private:
     std::map<std::string,std::vector<std::function<void()>>> fPendingRequests;
     std::set<std::string> fPendingOpen;
     std::shared_ptr<ProjectIndex> fIndex=std::make_shared<ProjectIndex>();
+    std::shared_ptr<ProjectIndexSlot> fIndexSlot=std::make_shared<ProjectIndexSlot>();
     std::string fProject,fGitRoot,fSettings;
     std::string fSessionDirectory;
     int64 fGeneration=0,fNextID=1,fSavePanelID=0;

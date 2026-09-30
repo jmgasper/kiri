@@ -1,6 +1,8 @@
 #pragma once
 #include <atomic>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <map>
@@ -8,11 +10,28 @@
 #include "core/FileIO.h"
 
 namespace kiri {
-struct DirectoryEntry { std::string name, path; bool directory=false, symlink=false; };
+// stamp is the entry's own lstat result: one metadata read per entry, which
+// matters on network volumes. Only symlinks need a second read (directory).
+struct DirectoryEntry { std::string name, path; bool directory=false, symlink=false; FileStamp stamp; };
 struct DirectoryResult { std::vector<DirectoryEntry> entries; std::string error; };
 DirectoryResult ListDirectory(const std::string& path, const std::atomic<bool>* cancel=nullptr);
-struct ProjectIndex { std::vector<std::string> paths; bool truncated=false; std::string error; };
-ProjectIndex IndexProject(const std::string& root, const std::atomic<bool>* cancel=nullptr, size_t limit=500000,bool includeIgnored=false);
+// partial: indexing is still running and paths holds the files found so far.
+struct ProjectIndex { std::vector<std::string> paths; bool truncated=false, partial=false; std::string error; };
+using IndexProgress=std::function<void(const ProjectIndex&)>;
+// progress receives snapshots while a slow directory walk runs (after about
+// half a second, then every two seconds); fast walks finish without one.
+ProjectIndex IndexProject(const std::string& root, const std::atomic<bool>* cancel=nullptr, size_t limit=500000,bool includeIgnored=false,
+    const IndexProgress& progress={});
+// The latest index of a workspace, shared with its quick-open windows so they
+// reuse it instead of walking the project again.
+class ProjectIndexSlot {
+public:
+    std::shared_ptr<ProjectIndex> Get() const { std::lock_guard<std::mutex> lock(fMutex);return fIndex; }
+    void Set(std::shared_ptr<ProjectIndex> index) { std::lock_guard<std::mutex> lock(fMutex);fIndex=std::move(index); }
+private:
+    mutable std::mutex fMutex;
+    std::shared_ptr<ProjectIndex> fIndex=std::make_shared<ProjectIndex>();
+};
 int FuzzyScore(const std::string& query, const std::string& path);
 std::vector<std::string> QuickOpen(const ProjectIndex& index, const std::string& query, size_t limit=100);
 struct ProjectSearchOptions : SearchOptions {

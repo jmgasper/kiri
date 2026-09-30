@@ -168,7 +168,7 @@ void Workspace::RequestSymbols(Document& document,LanguageServer& server) {
         });
 }
 void Workspace::LanguageTick() {
-    fJobs->Drain();
+    DrainJobs();
     for(auto& document:fDocuments) {
         auto previous=document->languageStatus;
         auto* server=EnsureLanguage(*document);

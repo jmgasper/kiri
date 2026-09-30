@@ -2,11 +2,15 @@
 #include "core/Process.h"
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <queue>
 #include <set>
+#include <dirent.h>
 #include <fnmatch.h>
+#include <sys/stat.h>
 
 namespace kiri {
 namespace fs=std::filesystem;
@@ -18,19 +22,26 @@ std::string Lower(std::string s) {
 }
 DirectoryResult ListDirectory(const std::string& path, const std::atomic<bool>* cancel) {
     DirectoryResult result;
-    std::error_code error;
-    fs::directory_iterator iterator(path,error);
-    if(error) { result.error=error.message();return result; }
-    for(;iterator!=fs::directory_iterator();iterator.increment(error)) {
-        if(error) { result.error=error.message();break; }
-        if(cancel && cancel->load()) break;
-        auto& entry=*iterator;
-        DirectoryEntry item;
-        item.name=entry.path().filename().string();item.path=entry.path().string();
-        item.symlink=entry.is_symlink(error);error.clear();
-        item.directory=entry.is_directory(error);error.clear();
+    DIR* directory=opendir(path.c_str());
+    if(!directory) { result.error=std::error_code(errno,std::generic_category()).message();return result; }
+    auto base=path;if(base.empty() || base.back()!='/') base+='/';
+    while(!(cancel && cancel->load())) {
+        errno=0;auto* entry=readdir(directory);
+        if(!entry) { if(errno) result.error=std::error_code(errno,std::generic_category()).message();break; }
+        std::string name=entry->d_name;if(name=="." || name=="..") continue;
+        DirectoryEntry item;item.name=name;item.path=base+name;
+        // Haiku's dirent has no type field, so this lstat is the only
+        // metadata read for ordinary entries; symlinks also check the target.
+        struct stat info;
+        if(lstat(item.path.c_str(),&info)==0) {
+            item.stamp={uint64_t(info.st_dev),uint64_t(info.st_ino),uint64_t(info.st_size),info.st_mtim.tv_sec,info.st_mtim.tv_nsec,true};
+            item.symlink=S_ISLNK(info.st_mode);
+            if(item.symlink) { struct stat target;item.directory=stat(item.path.c_str(),&target)==0 && S_ISDIR(target.st_mode); }
+            else item.directory=S_ISDIR(info.st_mode);
+        }
         result.entries.push_back(std::move(item));
     }
+    closedir(directory);
     std::sort(result.entries.begin(),result.entries.end(),[](const auto& a,const auto& b) {
         if(a.directory!=b.directory) return a.directory;
         auto al=Lower(a.name),bl=Lower(b.name);
@@ -38,15 +49,16 @@ DirectoryResult ListDirectory(const std::string& path, const std::atomic<bool>* 
     });
     return result;
 }
-ProjectIndex IndexProject(const std::string& root, const std::atomic<bool>* cancel, size_t limit,bool includeIgnored) {
+ProjectIndex IndexProject(const std::string& root, const std::atomic<bool>* cancel, size_t limit,bool includeIgnored,const IndexProgress& progress) {
     ProjectIndex result;
+    auto cancelled=[&]{return cancel && cancel->load();};
     ProcessOptions opts;opts.directory=root;opts.cancel=cancel;opts.outputLimit=64*1024*1024;
     std::vector<std::string> command={"git","ls-files","-z","--cached","--others"};
     if(!includeIgnored) command.push_back("--exclude-standard");
     auto git=RunProcess(command,opts);
     if(git.ok()) {
         size_t offset=0;
-        while(offset<git.output.size()) {
+        while(offset<git.output.size() && !cancelled()) {
             auto end=git.output.find('\0',offset);
             if(end==std::string::npos) break;
             if(result.paths.size()>=limit) { result.truncated=true;break; }
@@ -58,10 +70,12 @@ ProjectIndex IndexProject(const std::string& root, const std::atomic<bool>* canc
         result.paths.erase(std::unique(result.paths.begin(),result.paths.end()),result.paths.end());
         return result;
     }
-    if(cancel && cancel->load()) return result;
+    if(cancelled()) return result;
     const std::set<std::string> excluded={".git",".hg",".svn","node_modules",".cache",".vm","__pycache__",".venv","vendor","build","dist","target"};
     std::vector<fs::path> pending{root};
-    while(!pending.empty() && !(cancel && cancel->load())) {
+    using Clock=std::chrono::steady_clock;auto report=Clock::now()+std::chrono::milliseconds(500);
+    auto base=root;if(base.empty() || base.back()!='/') base+='/';
+    while(!pending.empty() && !cancelled()) {
         auto current=pending.back();pending.pop_back();
         auto listing=ListDirectory(current.string(),cancel);
         if(!listing.error.empty()) { if(current==fs::path(root)) result.error=listing.error;continue; }
@@ -70,8 +84,12 @@ ProjectIndex IndexProject(const std::string& root, const std::atomic<bool>* canc
             if(entry.directory) { if(entry.name!=".git" && entry.name!=".hg" && entry.name!=".svn" && (includeIgnored || !excluded.count(entry.name))) pending.emplace_back(entry.path); }
             else {
                 if(result.paths.size()>=limit) { result.truncated=true;return result; }
-                result.paths.push_back(fs::path(entry.path).lexically_relative(root).string());
+                result.paths.push_back(entry.path.compare(0,base.size(),base)==0?entry.path.substr(base.size()):fs::path(entry.path).lexically_relative(root).string());
             }
+        }
+        if(progress && !pending.empty() && !cancelled() && Clock::now()>=report) {
+            result.partial=true;progress(result);result.partial=false;
+            report=Clock::now()+std::chrono::seconds(2);
         }
     }
     return result;

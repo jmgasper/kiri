@@ -7,6 +7,8 @@
 #include <random>
 #include <stdexcept>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <ctime>
 namespace fs=std::filesystem;
 using namespace kiri;
 static int checks=0;
@@ -77,8 +79,35 @@ static void MonitorTests(const std::string& root) {
     fs::create_directory_symlink(root,root+"/cycle");auto symlinks=monitor.Poll();CHECK(std::find(symlinks.directories.begin(),symlinks.directories.end(),root+"/cycle")==symlinks.directories.end());
     std::atomic<bool> cancel{true};CHECK(monitor.Poll({},&cancel).changedDirectories.empty());
 }
+// Opening a large folder (#1): discovering an unchanged tree in small steps is
+// not a change. Each such report used to restart the whole project index, so
+// on a network volume the walk never finished and other work queued behind it.
+static void DiscoveryTests(const std::string& root) {
+    for(int i=0;i<40;++i) { auto folder=root+"/d"+std::to_string(i)+"/inner";fs::create_directories(folder);Put(folder+"/file.txt","x"); }
+    ProjectMonitor monitor(root);monitor.SetIndexTime(time(nullptr)+3600);
+    bool changed=false;size_t known=0;int polls=0;
+    while(known<81 && polls<200) { auto result=monitor.Poll({},nullptr,4);++polls;changed=changed || result.contents || !result.changedDirectories.empty();known=result.directories.size();
+        CHECK(result.nodes.size()==result.directories.size()); }
+    CHECK(known==81 && polls>10);CHECK(!changed);
+    auto steady=monitor.Poll({},nullptr,4);CHECK(!steady.contents && steady.changedDirectories.empty());
+    // Node references come from the listings, so watching needs no extra reads.
+    std::pair<uint64_t,uint64_t> node;CHECK(monitor.Node(root+"/d7/inner",node));
+    struct stat info;CHECK(stat((root+"/d7/inner").c_str(),&info)==0);CHECK(node.first==uint64_t(info.st_dev) && node.second==uint64_t(info.st_ino));
+    // A directory listed for the first time after it changed, later than the
+    // latest index began, is still reported.
+    ProjectMonitor late(root);late.SetIndexTime(0);CHECK(!late.Poll().changedDirectories.empty());
+    // One metadata read per entry supplies type, size and times.
+    fs::create_directory_symlink(root+"/d0",root+"/link");Put(root+"/sized.txt","12345");
+    auto listing=ListDirectory(root);CHECK(listing.error.empty());
+    auto find=[&](const std::string& name) { for(auto& entry:listing.entries) if(entry.name==name) return entry;throw std::runtime_error("missing "+name); };
+    CHECK(find("d0").directory && !find("d0").symlink && find("d0").stamp.exists);
+    CHECK(find("link").symlink && find("link").directory);
+    auto sized=find("sized.txt");CHECK(!sized.directory && sized.stamp.size==5 && sized.path==root+"/sized.txt");
+    CHECK(!ListDirectory(root+"/missing").error.empty());
+    std::atomic<bool> cancel{true};CHECK(ListDirectory(root,&cancel).entries.empty());CHECK(IndexProject(root,&cancel).paths.empty());
+}
 int main() {
     char temp[]="/tmp/kiri-refresh-diff-XXXXXX";auto* root=mkdtemp(temp);if(!root) return 1;
-    try { ModelTests();GitTests(std::string(root)+"/git");MonitorTests(std::string(root)+"/monitor");fs::remove_all(root);std::cout<<"Passed "<<checks<<" refresh and diff checks.\n"; }
+    try { ModelTests();GitTests(std::string(root)+"/git");MonitorTests(std::string(root)+"/monitor");DiscoveryTests(std::string(root)+"/discovery");fs::remove_all(root);std::cout<<"Passed "<<checks<<" refresh and diff checks.\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<" (files: "<<root<<")\n";return 1; }
 }

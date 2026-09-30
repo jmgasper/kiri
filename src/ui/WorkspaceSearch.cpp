@@ -66,7 +66,11 @@ void Workspace::RegisterEditWorkspace(bool add) {
         for(auto it=sReservedPaths.begin();it!=sReservedPaths.end();) { if(it->second==self) it=sReservedPaths.erase(it);else ++it; } }
 }
 bool Workspace::EditPathBusy(const std::string& path) const {
-    std::lock_guard<std::mutex> lock(sWorkspaceMutex);return sReservedPaths.count(CanonicalPath(path));
+    // Usually nothing is reserved: skip resolving the path (a network lookup
+    // for remote files) and never resolve while holding the shared lock.
+    { std::lock_guard<std::mutex> lock(sWorkspaceMutex);if(sReservedPaths.empty()) return false; }
+    auto canonical=CanonicalPath(path);
+    std::lock_guard<std::mutex> lock(sWorkspaceMutex);return sReservedPaths.count(canonical);
 }
 bool Workspace::ReserveEditPaths(bool reserve) {
     std::lock_guard<std::mutex> lock(sWorkspaceMutex);BMessenger self(this);
