@@ -55,7 +55,10 @@ Unavailable items can be removed from the list without deleting files.
 Choosing the previous project restores its saved tabs and editor positions.
 Opening a file or folder from Tracker or the command line goes straight to the
 workspace. To open a project from Tracker, right-click its folder and choose
-**Open with → Kiri**. Unsaved documents from an interrupted session recover immediately.
+**Open with → Kiri**. Kiri is offered in **Open with** for every `text/*` type
+(plain text, Markdown, HTML, CSS, XML, source code and so on) and for JSON,
+JavaScript, TypeScript, YAML, TOML, shell and other source formats that
+Haiku files under `application/`. Unsaved documents from an interrupted session recover immediately.
 **File → Show Launcher…** brings the launcher back while you work; opening
 another item there preserves your existing tabs. The launcher follows your theme.
 

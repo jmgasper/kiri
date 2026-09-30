@@ -12,13 +12,64 @@ resource app_version {
     short_info = "Kiri 0.0.1 alpha — native code editor",
     long_info = "A fast, native project editor for Haiku with Git and an embedded terminal."
 };
+// Tracker offers Kiri in Open With for every text/* type through the "text"
+// supertype. Common text subtypes are listed as well so Kiri ranks with their
+// dedicated handlers. Source and data formats that the MIME registry places
+// under application/ are listed individually; binary and video types are
+// never claimed (".ts" is registered as video/mp2t, but TypeScript files with
+// content sniff as text and are covered by the supertype).
 resource file_types message {
     "types" = "application/x-vnd.Be-directory",
+    "types" = "text",
     "types" = "text/plain",
     "types" = "text/x-source-code",
+    "types" = "text/markdown",
+    "types" = "text/html",
+    "types" = "text/css",
+    "types" = "text/xml",
+    "types" = "text/csv",
+    "types" = "text/x-makefile",
+    "types" = "text/x-jamfile",
+    "types" = "text/x-patch",
     "types" = "text/x-c++src",
     "types" = "text/x-csrc",
-    "types" = "text/html",
     "types" = "application/json",
-    "types" = "text/xml"
+    "types" = "application/ld+json",
+    "types" = "application/manifest+json",
+    "types" = "application/x-ndjson",
+    "types" = "application/x-ipynb+json",
+    "types" = "application/javascript",
+    "types" = "application/x-javascript",
+    "types" = "application/ecmascript",
+    "types" = "application/typescript",
+    "types" = "application/x-typescript",
+    "types" = "application/xml",
+    "types" = "application/xhtml+xml",
+    "types" = "application/xslt+xml",
+    "types" = "application/rss+xml",
+    "types" = "application/atom+xml",
+    "types" = "application/x-yaml",
+    "types" = "application/yaml",
+    "types" = "application/toml",
+    "types" = "application/x-toml",
+    "types" = "application/x-sh",
+    "types" = "application/x-shellscript",
+    "types" = "application/x-csh",
+    "types" = "application/x-perl",
+    "types" = "application/x-python",
+    "types" = "application/x-ruby",
+    "types" = "application/x-php",
+    "types" = "application/x-httpd-php",
+    "types" = "application/x-lua",
+    "types" = "application/x-tcl",
+    "types" = "application/x-awk",
+    "types" = "application/sql",
+    "types" = "application/x-sql",
+    "types" = "application/graphql",
+    "types" = "application/x-tex",
+    "types" = "application/x-latex",
+    "types" = "application/x-desktop",
+    "types" = "application/x-subrip",
+    "types" = "application/x-diff",
+    "types" = "application/x-patch"
 };
