@@ -1,5 +1,59 @@
 # Verification record
 
+## Large network folders and text file types — develop (0.0.2 alpha)
+
+Verified September 30, 2026 on Linux, in the Haiku R1/beta5 QEMU VM and on the
+X399 workstation (Haiku x86_64 hrev60097 fork), for issues
+[#1](https://github.com/jmgasper/kiri/issues/1) and
+[#2](https://github.com/jmgasper/kiri/issues/2).
+
+Issue #1 was reproduced on the workstation's SMB share (`/Documents`, mounted
+through userlandfs) with a local file already open: a file opened ten seconds
+after the folder had not loaded 45 seconds later. A debugger report showed both
+shared workers walking the whole share (`IndexProject` → `ListDirectory` →
+`lstat`). One walk was the initial index; the other was a second full walk,
+started because the change scan reported every directory it listed for the
+first time as changed. The document load was queued behind both. Details and
+timings are in [measurements](PERFORMANCE.md#large-and-network-folders).
+
+After the change the same scenario opens files in 70–176 ms while the index is
+still running, window round trips stay under 150 ms, and quitting takes under
+0.2 s. In the installed 0.0.2 build, `/Documents` was opened from the launcher,
+a Markdown note was opened from the tree while one worker was still indexing
+the share, and **Quit** returned in 148 ms.
+
+All seven CMake/CTest suites passed on Linux. In the VM, Haiku passed 85
+Markdown, 169 core, 94 search/edit, 3,761 refresh/diff, 82 analysis/theme,
+83 document-settings, 373 native editor/worker, 84 language, 936 workspace
+and 168 native Markdown checks. The workspace total excludes the Editing
+Defaults Preferences check, which fails identically on the unmodified previous
+commit in this VM (`WorkspaceTests.cpp` preview indentation/minimap assertion).
+New checks cover first-time discovery of an unchanged 81-directory tree,
+listing metadata, cancelled listings and index walks, bounded reaping of a
+killed child, and a workspace whose project worker is blocked in an
+uncancellable job: the tree, Git repository detection and a file load still
+complete, refresh requests coalesce, Open Quickly waits for the shared index,
+and the window closes in about 2 s (`kiri_workspace_tests --slow-project`).
+
+For issue #2, the application declares the `text` supertype, common text
+subtypes and 39 `application/` source and data types (JSON, JavaScript,
+TypeScript, XML, YAML, TOML, shell, Perl, Python, Ruby, PHP, SQL, TeX and
+others). After installing the package, `BMimeType::GetSupportingApps` listed
+Kiri for sample files typed `text/plain`, `text/x-source-code`, `text/markdown`,
+`text/html`, `text/xml`, `text/x-makefile`, `application/json`,
+`application/javascript`, `application/xml`, `application/x-sh`,
+`application/x-yaml` and `application/x-perl`. Tracker's **Open with** menu
+showed Kiri for `.ts`, `.md` (sniffed as `text/plain` and typed
+`text/markdown`) and `.json` files. Types Kiri introduces default to Kiri;
+existing preferred applications are unchanged.
+
+Limits: an empty `.ts` file is typed `video/mp2t` by its extension and does not
+offer Kiri; TypeScript files with content sniff as text. Files on the
+userlandfs/FUSE SMB share report `application/octet-stream` for extensions the
+file system's own table does not know (for example `.md`, `.json`, `.py`), so
+Kiri is not offered for them there until the file system recognizes those
+extensions.
+
 ## Live Markdown preview — develop
 
 Verified September 16, 2026 on Linux and Haiku R1/beta5 in the existing QEMU VM.

@@ -6,10 +6,10 @@ resource vector_icon {
 resource app_version {
     major = 0,
     middle = 0,
-    minor = 1,
+    minor = 2,
     variety = B_APPV_ALPHA,
     internal = 0,
-    short_info = "Kiri 0.0.1 alpha — native code editor",
+    short_info = "Kiri 0.0.2 alpha — native code editor",
     long_info = "A fast, native project editor for Haiku with Git and an embedded terminal."
 };
 // Tracker offers Kiri in Open With for every text/* type through the "text"
